@@ -24,7 +24,8 @@ jobs:
           }
           & ./scripts/build-plugin.ps1
           & ./tests/verify-pulse-button.ps1
-          docker run --rm --mount type=bind,source="$($PWD.Path)",target=/app -w /app php:7.4-cli sh -lc 'php -l personal-cta-blocks.php && php tests/verify-github-updater.php'
+          $mount = "type=bind,source=$env:GITHUB_WORKSPACE,target=/app"
+          docker run --rm --mount $mount -w /app php:7.4-cli sh -lc 'php -l personal-cta-blocks.php && php tests/verify-github-updater.php'
 
       - name: Publish GitHub release
         shell: pwsh
