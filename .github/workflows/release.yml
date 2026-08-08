@@ -1,0 +1,35 @@
+name: Release plugin
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build and verify
+        shell: pwsh
+        run: |
+          $version = $env:GITHUB_REF_NAME -replace '^v'
+          $plugin = Get-Content -Raw personal-cta-blocks.php
+          if ($plugin -notmatch "(?m)^\s*\*\s*Version:\s*$([regex]::Escape($version))\s*$") {
+            throw "Tag $env:GITHUB_REF_NAME does not match the plugin version."
+          }
+          & ./scripts/build-plugin.ps1
+          & ./tests/verify-pulse-button.ps1
+          docker run --rm --mount type=bind,source="$($PWD.Path)",target=/app -w /app php:7.4-cli sh -lc 'php -l personal-cta-blocks.php && php tests/verify-github-updater.php'
+
+      - name: Publish GitHub release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $version = $env:GITHUB_REF_NAME -replace '^v'
+          gh release create $env:GITHUB_REF_NAME "dist/personal-cta-blocks-$version.zip" --verify-tag --generate-notes

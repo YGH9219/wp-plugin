@@ -1,0 +1,24 @@
+.wp-block-personal-cta-blocks-pulse-button .personal-cta-blocks-pulse-button__fields {
+	background: #f8fafc;
+	border: 1px solid #dbe3ee;
+	border-radius: 12px;
+	display: grid;
+	gap: 12px;
+	max-width: 560px;
+	padding: 16px;
+}
+
+.wp-block-personal-cta-blocks-pulse-button .personal-cta-blocks-pulse-button__fields .components-base-control {
+	margin-bottom: 0;
+}
+
+.wp-block-personal-cta-blocks-pulse-button .personal-cta-blocks-pulse-button__field-label {
+	font-size: 11px;
+	font-weight: 500;
+	margin: 0 0 8px;
+	text-transform: uppercase;
+}
+
+.wp-block-personal-cta-blocks-pulse-button .personal-cta-blocks-pulse-button__preview {
+	margin-top: 16px;
+}

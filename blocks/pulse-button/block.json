@@ -1,0 +1,29 @@
+{
+  "$schema": "https://schemas.wp.org/trunk/block.json",
+  "apiVersion": 3,
+  "name": "personal-cta-blocks/pulse-button",
+  "version": "0.1.2",
+  "title": "펄스 CTA 버튼",
+  "category": "design",
+  "icon": "megaphone",
+  "description": "문구와 이동할 페이지를 입력하면 눈에 띄는 버튼을 만듭니다.",
+  "keywords": ["버튼", "펄스", "CTA", "ㅂㅌ"],
+  "textdomain": "personal-cta-blocks",
+  "attributes": {
+    "text": {
+      "type": "string",
+      "default": "지금 확인하기"
+    },
+    "url": {
+      "type": "string",
+      "default": ""
+    }
+  },
+  "supports": {
+    "html": false
+  },
+  "editorScript": "file:./editor.js",
+  "style": "file:./style.css",
+  "editorStyle": "file:./editor.css",
+  "render": "file:./render.php"
+}
