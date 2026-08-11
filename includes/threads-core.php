@@ -16,13 +16,10 @@ define( 'PERSONAL_CTA_THREADS_WATCHDOG_HOOK', 'personal_cta_threads_watchdog' );
  */
 function personal_cta_threads_settings() {
 	$defaults = array(
-		'enabled'      => false,
-		'auto_publish' => false,
-		'one_click'    => false,
-		'include_link' => true,
-		'link_mode'    => 'attachment',
-		'add_utm'      => true,
-		'model'        => 'gpt-5.6-sol',
+		'enabled'        => false,
+		'include_link'   => true,
+		'add_utm'        => true,
+		'model'          => 'gpt-5.6-sol',
 		'style_examples' => array(),
 	);
 	$saved    = get_option( PERSONAL_CTA_THREADS_SETTINGS_OPTION, array() );
@@ -247,7 +244,7 @@ function personal_cta_threads_source( $post_id ) {
 }
 
 /**
- * Counts Threads text using Meta's documented emoji-byte behavior.
+ * Counts Threads text using its documented emoji-byte behavior.
  *
  * @param string $text Text.
  * @return int
@@ -297,7 +294,7 @@ function personal_cta_threads_outbound_url( $post_id ) {
 }
 
 /**
- * Returns final Meta text and link attachment without letting the model create URLs.
+ * Returns the manual-copy text without letting the model create URLs.
  *
  * @param int    $post_id Post ID.
  * @param string $body Model/user body.
@@ -312,11 +309,10 @@ function personal_cta_threads_payload_text( $post_id, $body ) {
 	if ( preg_match( '#https?://#i', $body ) ) {
 		return new WP_Error( 'pct_body_contains_url', '링크는 플러그인이 자동으로 붙입니다. 본문 URL을 제거하세요.' );
 	}
-	$url      = ! empty( $settings['include_link'] ) ? personal_cta_threads_outbound_url( $post_id ) : '';
-	$mode     = ! empty( $settings['include_link'] ) ? (string) $settings['link_mode'] : 'none';
-	$text     = $body;
+	$url  = ! empty( $settings['include_link'] ) ? personal_cta_threads_outbound_url( $post_id ) : '';
+	$text = $body;
 
-	if ( '' !== $url && 'raw' === $mode ) {
+	if ( '' !== $url ) {
 		$text .= "\n\n" . $url;
 	}
 
@@ -326,12 +322,10 @@ function personal_cta_threads_payload_text( $post_id, $body ) {
 	}
 
 	return array(
-		'body'            => $body,
-		'text'            => $text,
-		'link_attachment' => 'attachment' === $mode ? $url : '',
-		'outbound_url'    => $url,
-		'link_mode'       => $mode,
-		'length'          => $length,
+		'body'         => $body,
+		'text'         => $text,
+		'outbound_url' => $url,
+		'length'       => $length,
 	);
 }
 
@@ -429,22 +423,17 @@ function personal_cta_threads_continue_job( $post_id, $delay = 1 ) {
 }
 
 /**
- * Queues generation and optional publish.
+ * Queues copy generation.
  *
  * @param int  $post_id Post ID.
- * @param bool $publish Publish after generation and grounding verification.
  * @param bool $regenerate Reuse FACT map where possible.
  * @return true|WP_Error
  */
-function personal_cta_threads_queue( $post_id, $publish = false, $regenerate = false ) {
+function personal_cta_threads_queue( $post_id, $regenerate = false ) {
 	if ( ! get_post( $post_id ) || ! current_user_can( 'edit_post', $post_id ) ) {
-		return new WP_Error( 'pct_forbidden', '이 글을 내보낼 권한이 없습니다.' );
-	}
-	if ( personal_cta_threads_meta( $post_id, 'remote_id' ) ) {
-		return new WP_Error( 'pct_already_published', '이미 Threads에 게시된 글입니다.' );
+		return new WP_Error( 'pct_forbidden', '이 글의 문구를 만들 권한이 없습니다.' );
 	}
 
-	personal_cta_threads_set_meta( $post_id, 'publish_after_generate', $publish ? 1 : 0 );
 	personal_cta_threads_set_meta( $post_id, 'regenerate', $regenerate ? 1 : 0 );
 	personal_cta_threads_set_state( $post_id, 'queued', 'queued' );
 
@@ -456,38 +445,6 @@ function personal_cta_threads_queue( $post_id, $publish = false, $regenerate = f
 
 	return true;
 }
-
-/**
- * Handles the first publish transition only when automatic posting is enabled.
- *
- * @param string  $new_status New status.
- * @param string  $old_status Old status.
- * @param WP_Post $post Post.
- * @return void
- */
-function personal_cta_threads_transition_post_status( $new_status, $old_status, $post ) {
-	$settings = personal_cta_threads_settings();
-	if ( 'publish' !== $new_status || 'publish' === $old_status || 'post' !== $post->post_type || empty( $settings['enabled'] ) || empty( $settings['auto_publish'] ) ) {
-		return;
-	}
-	if ( personal_cta_threads_meta( $post->ID, 'remote_id' ) ) {
-		return;
-	}
-
-	$marker = 'personal_cta_threads_trigger_' . (int) $post->ID;
-	if ( ! add_option( $marker, time(), '', false ) ) {
-		return;
-	}
-
-	personal_cta_threads_set_meta( $post->ID, 'publish_after_generate', 1 );
-	personal_cta_threads_set_meta( $post->ID, 'regenerate', 0 );
-	personal_cta_threads_set_state( $post->ID, 'queued', 'auto_publish' );
-	$result = personal_cta_threads_continue_job( $post->ID );
-	if ( is_wp_error( $result ) || false === $result ) {
-		personal_cta_threads_set_state( $post->ID, 'failed', 'queue', '자동 작업 예약에 실패했습니다. 설정 화면에서 재개하세요.' );
-	}
-}
-add_action( 'transition_post_status', 'personal_cta_threads_transition_post_status', 10, 3 );
 
 /**
  * Executes a resumable generation job.
@@ -521,20 +478,6 @@ function personal_cta_threads_run_job( $post_id ) {
 			return;
 		}
 
-		if ( personal_cta_threads_meta( $post_id, 'publish_after_generate', 0 ) ) {
-			$verified = personal_cta_threads_verify( $post_id, $result['text'] );
-			if ( is_wp_error( $verified ) ) {
-				personal_cta_threads_set_state( $post_id, 'blocked', 'verifier', $verified->get_error_message() );
-				return;
-			}
-
-			personal_cta_threads_set_state( $post_id, 'publishing', 'verified' );
-			$published = personal_cta_threads_publish( $post_id, $result['text'] );
-			if ( is_wp_error( $published ) ) {
-				$status = 'pct_uncertain' === $published->get_error_code() ? 'uncertain' : 'failed';
-				personal_cta_threads_set_state( $post_id, $status, 'publishing', $published->get_error_message() );
-			}
-		}
 	} finally {
 		if ( ! $keep_lease ) {
 			delete_post_meta( $post_id, '_pct_threads_lease_until' );
@@ -605,15 +548,7 @@ function personal_cta_threads_watchdog() {
 
 	foreach ( $post_ids as $post_id ) {
 		$status = personal_cta_threads_meta( $post_id, 'status' );
-		if ( 'publishing' === $status ) {
-			if ( personal_cta_threads_meta( $post_id, 'creation_id' ) ) {
-				wp_schedule_single_event( time() + 1, 'personal_cta_threads_reconcile_job', array( (int) $post_id ), true );
-			} else {
-				personal_cta_threads_continue_job( $post_id );
-			}
-		} elseif ( in_array( $status, array( 'queued', 'analyzing', 'drafting', 'editing', 'verifying' ), true ) ) {
-			personal_cta_threads_continue_job( $post_id );
-		} elseif ( 'ready' === $status && personal_cta_threads_meta( $post_id, 'publish_after_generate', 0 ) ) {
+		if ( in_array( $status, array( 'queued', 'analyzing', 'drafting', 'editing' ), true ) ) {
 			personal_cta_threads_continue_job( $post_id );
 		}
 	}
@@ -644,3 +579,19 @@ function personal_cta_threads_deactivate() {
 	wp_unschedule_hook( 'personal_cta_threads_refresh_token' );
 }
 register_deactivation_hook( PERSONAL_CTA_BLOCKS_FILE, 'personal_cta_threads_deactivate' );
+
+/**
+ * Removes legacy Meta-only schedules once, without deleting saved credentials.
+ *
+ * @return void
+ */
+function personal_cta_threads_clear_legacy_meta_jobs() {
+	if ( get_option( 'personal_cta_threads_meta_jobs_cleared' ) ) {
+		return;
+	}
+
+	wp_unschedule_hook( 'personal_cta_threads_reconcile_job' );
+	wp_unschedule_hook( 'personal_cta_threads_refresh_token' );
+	add_option( 'personal_cta_threads_meta_jobs_cleared', time(), '', false );
+}
+add_action( 'init', 'personal_cta_threads_clear_legacy_meta_jobs', 1 );

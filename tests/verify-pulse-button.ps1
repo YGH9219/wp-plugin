@@ -21,10 +21,9 @@ if (-not $block.attributes.text -or -not $block.attributes.url) { throw 'Text or
 	'blocks\pulse-button\style.css',
 	'includes\threads-core.php',
 	'includes\threads-openai.php',
-	'includes\threads-meta.php',
 	'includes\threads-admin.php',
-	'assets\threads-admin.js',
-	'assets\threads-admin.css'
+	'assets\threads-editor-panel.js',
+	'assets\threads-editor-panel.css'
 ) |
 	ForEach-Object {
 		if (-not (Test-Path (Join-Path $root $_))) { throw "Missing required file: $_" }
@@ -41,10 +40,9 @@ if (Test-Path $archivePath) {
 			'personal-cta-blocks/personal-cta-blocks.php',
 			'personal-cta-blocks/includes/threads-core.php',
 			'personal-cta-blocks/includes/threads-openai.php',
-			'personal-cta-blocks/includes/threads-meta.php',
 			'personal-cta-blocks/includes/threads-admin.php',
-			'personal-cta-blocks/assets/threads-admin.js',
-			'personal-cta-blocks/assets/threads-admin.css'
+			'personal-cta-blocks/assets/threads-editor-panel.js',
+			'personal-cta-blocks/assets/threads-editor-panel.css'
 		)
 		foreach ($requiredEntry in $requiredEntries) {
 			if ($entries -notcontains $requiredEntry) { throw "Plugin ZIP is missing $requiredEntry." }

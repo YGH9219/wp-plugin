@@ -1,0 +1,26 @@
+.pct-threads-editor-panel .components-textarea-control__input {
+	min-height: 14rem;
+	resize: vertical;
+}
+
+.pct-threads-editor-panel .pct-threads-editor-status {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+}
+
+.pct-threads-editor-panel .components-spinner {
+	margin: 0;
+}
+
+.pct-threads-editor-panel .pct-threads-editor-actions {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 8px;
+}
+
+@media (max-width: 782px) {
+	.pct-threads-editor-panel {
+		display: none;
+	}
+}

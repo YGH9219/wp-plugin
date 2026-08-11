@@ -5,14 +5,10 @@
 
 define( 'ABSPATH', __DIR__ );
 define( 'PERSONAL_CTA_BLOCKS_FILE', dirname( __DIR__ ) . '/personal-cta-blocks.php' );
-define( 'PERSONAL_CTA_THREADS_MASTER_KEY', 'test-only-master-key-that-is-never-shipped-as-a-secret' );
-define( 'PERSONAL_CTA_THREADS_USER_ID', '123456789' );
-define( 'PERSONAL_CTA_THREADS_ACCESS_TOKEN', 'test-token' );
 define( 'DAY_IN_SECONDS', 86400 );
 
 $test_options = array();
 $test_meta    = array();
-$test_fail_meta_key = '';
 
 class WP_Error {
 	private $code;
@@ -69,10 +65,7 @@ function get_post_meta( $post_id, $key, $single = false ) {
 	return isset( $test_meta[ $post_id ][ $key ] ) ? $test_meta[ $post_id ][ $key ] : '';
 }
 function update_post_meta( $post_id, $key, $value ) {
-	global $test_meta, $test_fail_meta_key;
-	if ( '' !== $test_fail_meta_key && $key === $test_fail_meta_key ) {
-		return false;
-	}
+	global $test_meta;
 	$test_meta[ $post_id ][ $key ] = $value;
 	return true;
 }
@@ -112,38 +105,8 @@ function get_posts( $args ) { return array(); }
 function wp_cache_delete( $key, $group = '' ) { return true; }
 function maybe_serialize( $value ) { return is_scalar( $value ) ? (string) $value : serialize( $value ); }
 
-$test_http_requests = array();
-$test_ambiguous_publish = false;
-function wp_remote_request( $url, $args ) {
-	global $test_http_requests, $test_ambiguous_publish;
-	$test_http_requests[] = array( 'url' => $url, 'args' => $args );
-
-	if ( false !== strpos( $url, '/threads_publish' ) ) {
-		if ( $test_ambiguous_publish ) {
-			return new WP_Error( 'http_request_failed', 'simulated timeout' );
-		}
-		$data = array( 'id' => 'media-1' );
-	} elseif ( 'POST' === $args['method'] && preg_match( '#/\d+/threads$#', $url ) ) {
-		$test_ambiguous_publish = isset( $args['body']['text'] ) && '모호한 게시' === $args['body']['text'];
-		$data = array( 'id' => $test_ambiguous_publish ? 'container-ambiguous' : 'container-1' );
-	} elseif ( false !== strpos( $url, '/container-ambiguous' ) ) {
-		$data = array( 'id' => 'container-ambiguous', 'status' => 'FINISHED' );
-	} elseif ( 'GET' === $args['method'] && false !== strpos( $url, '/123456789/threads' ) ) {
-		$data = array( 'data' => array() );
-	} elseif ( false !== strpos( $url, '/media-1' ) ) {
-		$data = array( 'id' => 'media-1', 'permalink' => 'https://www.threads.com/@example/post/1' );
-	} else {
-		$data = array();
-	}
-
-	return array( 'response' => array( 'code' => 200 ), 'body' => json_encode( $data ) );
-}
-function wp_remote_retrieve_response_code( $response ) { return (int) $response['response']['code']; }
-function wp_remote_retrieve_body( $response ) { return (string) $response['body']; }
-
 require dirname( __DIR__ ) . '/includes/threads-core.php';
 require dirname( __DIR__ ) . '/includes/threads-openai.php';
-require dirname( __DIR__ ) . '/includes/threads-meta.php';
 
 function pct_assert( $condition, $message ) {
 	if ( ! $condition ) {
@@ -152,7 +115,7 @@ function pct_assert( $condition, $message ) {
 }
 
 pct_assert( 3 === personal_cta_threads_character_length( '가나다' ), 'Unicode length fallback is invalid.' );
-pct_assert( 5 === personal_cta_threads_length( '가😀' ), 'Meta emoji byte counting is invalid.' );
+pct_assert( 5 === personal_cta_threads_length( '가😀' ), 'Threads emoji byte counting is invalid.' );
 pct_assert( "첫째\n둘째" === personal_cta_threads_clean_text( '<p>첫째</p><p>둘째</p>' ), 'HTML normalization is invalid.' );
 
 $source = personal_cta_threads_source( 7 );
@@ -163,8 +126,7 @@ pct_assert( false === strpos( $source['text'], '[secret]' ), 'Shortcodes must no
 
 $payload = personal_cta_threads_payload_text( 7, '본문' );
 pct_assert( is_array( $payload ), 'A short Threads payload must be valid.' );
-pct_assert( '본문' === $payload['text'], 'Attachment mode must not append the URL to text.' );
-pct_assert( false !== strpos( $payload['link_attachment'], 'utm_source=threads' ), 'The deterministic outbound URL is missing UTM data.' );
+pct_assert( false !== strpos( $payload['text'], 'https://example.test/sample-post/?utm_source=threads' ), 'The copied text must include the deterministic outbound URL.' );
 
 $too_long = personal_cta_threads_payload_text( 7, str_repeat( 'a', 501 ) );
 pct_assert( is_wp_error( $too_long ) && 'pct_text_too_long' === $too_long->get_error_code(), 'The server must reject text over 500 characters.' );
@@ -250,65 +212,8 @@ $missing_check = $verification;
 array_pop( $missing_check['checks'] );
 pct_assert( is_wp_error( personal_cta_threads_validate_verifier( $missing_check, $fact_map, $source['text'], $units, array( 'F1' ) ) ), 'A verifier may not omit a candidate line.' );
 
-$encrypted = personal_cta_threads_encrypt_token( 'sensitive-test-token' );
-pct_assert( is_array( $encrypted ), 'The token must be encrypted before storage.' );
-pct_assert( 'sensitive-test-token' === personal_cta_threads_decrypt_token( $encrypted ), 'Encrypted token roundtrip failed.' );
-$tampered               = $encrypted;
-$tampered['ciphertext'] = base64_encode( 'tampered' );
-pct_assert( is_wp_error( personal_cta_threads_decrypt_token( $tampered ) ), 'Tampered ciphertext must be rejected.' );
+$queued = personal_cta_threads_queue( 7, false );
+pct_assert( true === $queued, 'A copy-generation request must queue successfully.' );
+pct_assert( 'queued' === personal_cta_threads_meta( 7, 'status' ), 'A copy-generation request must never publish the post.' );
 
-$published = personal_cta_threads_publish( 7, '게시할 본문' );
-pct_assert( is_array( $published ) && 'media-1' === $published['id'], 'A confirmed Meta publish must persist its media ID.' );
-$request_count = count( $test_http_requests );
-$again         = personal_cta_threads_publish( 7, '게시할 본문' );
-pct_assert( is_array( $again ) && 'media-1' === $again['id'], 'An already published post must return its saved result.' );
-pct_assert( $request_count === count( $test_http_requests ), 'A duplicate publish must make zero HTTP requests.' );
-
-$uncertain = personal_cta_threads_publish( 8, '모호한 게시' );
-pct_assert( is_wp_error( $uncertain ) && 'pct_uncertain' === $uncertain->get_error_code(), 'An ambiguous publish must stop in the uncertain state.' );
-$post_count = count(
-	array_filter(
-		$test_http_requests,
-		function ( $request ) {
-			return 'POST' === $request['args']['method'];
-		}
-	)
-);
-personal_cta_threads_publish( 8, '모호한 게시' );
-$post_count_after_reconcile = count(
-	array_filter(
-		$test_http_requests,
-		function ( $request ) {
-			return 'POST' === $request['args']['method'];
-		}
-	)
-);
-pct_assert( $post_count === $post_count_after_reconcile, 'Ambiguous recovery must never resend a Meta POST.' );
-
-$test_fail_meta_key = '_pct_threads_publish_started_at';
-$before_requests     = count( $test_http_requests );
-$checkpoint_failure = personal_cta_threads_publish( 9, '체크포인트 실패 테스트' );
-$new_requests        = array_slice( $test_http_requests, $before_requests );
-$publish_posts       = array_filter(
-	$new_requests,
-	function ( $request ) {
-		return 'POST' === $request['args']['method'] && false !== strpos( $request['url'], '/threads_publish' );
-	}
-);
-pct_assert( is_wp_error( $checkpoint_failure ) && 'pct_meta_checkpoint_failed' === $checkpoint_failure->get_error_code(), 'A failed durable marker must abort publishing.' );
-pct_assert( 0 === count( $publish_posts ), 'The non-idempotent publish POST must not run after a checkpoint failure.' );
-$test_fail_meta_key = '';
-
-personal_cta_threads_set_meta( 10, 'creation_id', 'orphan-container' );
-personal_cta_threads_set_state( 10, 'publishing', 'publishing' );
-$partial_container = personal_cta_threads_reconcile( 10 );
-pct_assert( is_wp_error( $partial_container ) && 'pct_meta_publish_not_started' === $partial_container->get_error_code(), 'A container-only crash must become explicitly retryable.' );
-pct_assert( '' === personal_cta_threads_meta( 10, 'creation_id' ), 'A safe container-only checkpoint must be cleared.' );
-
-personal_cta_threads_set_meta( 11, 'remote_id', 'media-partial' );
-personal_cta_threads_set_state( 11, 'publishing', 'publishing' );
-$partial_remote = personal_cta_threads_reconcile( 11 );
-pct_assert( is_array( $partial_remote ) && 'media-partial' === $partial_remote['id'], 'A saved remote ID must repair partial local state.' );
-pct_assert( 'published' === personal_cta_threads_meta( 11, 'status' ) && 0 < personal_cta_threads_meta( 11, 'published_at', 0 ), 'Partial remote state was not finalized.' );
-
-echo "Threads core, OpenAI, and Meta safeguards are valid.\n";
+echo "Threads copy-generation safeguards are valid.\n";

@@ -71,10 +71,9 @@ try {
 		"$slug/$slug.php",
 		"$slug/includes/threads-core.php",
 		"$slug/includes/threads-openai.php",
-		"$slug/includes/threads-meta.php",
 		"$slug/includes/threads-admin.php",
-		"$slug/assets/threads-admin.js",
-		"$slug/assets/threads-admin.css"
+		"$slug/assets/threads-editor-panel.js",
+		"$slug/assets/threads-editor-panel.css"
 	)
 	$missingEntries = @($requiredEntries | Where-Object { $entryNames -notcontains $_ })
 	if ($missingEntries.Count -eq 0 -and $entryNames -notmatch '\\') {

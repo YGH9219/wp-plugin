@@ -951,14 +951,14 @@ function personal_cta_threads_openai_pending( $post_id ) {
 }
 
 /**
- * Calculates the maximum body length before PHP appends a raw URL.
+ * Calculates the maximum body length before PHP appends the copied URL.
  *
  * @param int $post_id Post ID.
  * @return int
  */
 function personal_cta_threads_body_limit( $post_id ) {
 	$settings = personal_cta_threads_settings();
-	if ( ! empty( $settings['include_link'] ) && 'raw' === ( isset( $settings['link_mode'] ) ? $settings['link_mode'] : '' ) ) {
+	if ( ! empty( $settings['include_link'] ) ) {
 		return max( 1, 500 - personal_cta_threads_length( personal_cta_threads_outbound_url( $post_id ) ) - 2 );
 	}
 

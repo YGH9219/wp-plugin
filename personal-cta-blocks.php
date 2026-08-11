@@ -2,8 +2,8 @@
 /**
  * Plugin Name: Personal CTA Blocks
  * Plugin URI: https://github.com/YGH9219/wp-plugin
- * Description: 펄스 CTA 버튼과 WordPress 글의 Threads 내보내기를 제공합니다.
- * Version: 0.2.0
+ * Description: 펄스 CTA 버튼과 WordPress 글의 AI Threads 문구 생성을 제공합니다.
+ * Version: 0.3.0
  * Requires at least: 6.3
  * Requires PHP: 7.4
  * Update URI: https://github.com/YGH9219/wp-plugin
@@ -12,14 +12,13 @@
 
 defined( 'ABSPATH' ) || exit;
 
-define( 'PERSONAL_CTA_BLOCKS_VERSION', '0.2.0' );
+define( 'PERSONAL_CTA_BLOCKS_VERSION', '0.3.0' );
 define( 'PERSONAL_CTA_BLOCKS_FILE', __FILE__ );
 define( 'PERSONAL_CTA_BLOCKS_DIR', __DIR__ );
 define( 'PERSONAL_CTA_BLOCKS_URL', plugin_dir_url( __FILE__ ) );
 
 require_once __DIR__ . '/includes/threads-core.php';
 require_once __DIR__ . '/includes/threads-openai.php';
-require_once __DIR__ . '/includes/threads-meta.php';
 require_once __DIR__ . '/includes/threads-admin.php';
 
 function personal_cta_blocks_register_blocks() {
@@ -169,7 +168,7 @@ function personal_cta_blocks_github_plugin_information( $result, $action, $args 
 		'requires'      => '6.3',
 		'requires_php'  => '7.4',
 		'sections'      => array(
-			'description' => '<p>반응형 펄스 CTA 블록과 WordPress 글의 안전한 Threads 내보내기를 제공합니다.</p>',
+			'description' => '<p>반응형 펄스 CTA 블록과 WordPress 글의 AI Threads 문구 생성을 제공합니다.</p>',
 			'changelog'   => '' === $notes ? '<p>변경 사항이 없습니다.</p>' : nl2br( esc_html( $notes ) ),
 		),
 	);
