@@ -5,6 +5,7 @@
 
 define( 'ABSPATH', __DIR__ );
 define( 'PERSONAL_CTA_BLOCKS_FILE', dirname( __DIR__ ) . '/personal-cta-blocks.php' );
+define( 'OPENAI_API_KEY', 'test-openai-key' );
 define( 'DAY_IN_SECONDS', 86400 );
 
 $test_options = array();
@@ -116,6 +117,7 @@ function pct_assert( $condition, $message ) {
 
 pct_assert( 3 === personal_cta_threads_character_length( '가나다' ), 'Unicode length fallback is invalid.' );
 pct_assert( 5 === personal_cta_threads_length( '가😀' ), 'Threads emoji byte counting is invalid.' );
+pct_assert( 'test-openai-key' === personal_cta_threads_config_secret( 'PERSONAL_CTA_OPENAI_API_KEY', 'OPENAI_API_KEY' ), 'The standard OpenAI wp-config constant must be recognized.' );
 pct_assert( "첫째\n둘째" === personal_cta_threads_clean_text( '<p>첫째</p><p>둘째</p>' ), 'HTML normalization is invalid.' );
 
 $source = personal_cta_threads_source( 7 );

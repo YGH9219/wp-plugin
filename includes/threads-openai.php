@@ -164,7 +164,7 @@ function personal_cta_threads_openai_parse_response( $body, $http_status = 200 )
 function personal_cta_threads_openai_request( $stage, $developer_prompt, $context, $schema, $max_output_tokens = 4096 ) {
 	$key = personal_cta_threads_openai_key();
 	if ( '' === $key ) {
-		return new WP_Error( 'pct_openai_not_configured', 'wp-config.php에 PERSONAL_CTA_OPENAI_API_KEY를 설정하세요.' );
+		return new WP_Error( 'pct_openai_not_configured', 'wp-config.php에 PERSONAL_CTA_OPENAI_API_KEY 또는 OPENAI_API_KEY를 설정하세요.' );
 	}
 
 	$stage       = sanitize_key( $stage );

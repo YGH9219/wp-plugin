@@ -25,7 +25,7 @@ API 키는 플러그인 설정이나 Git 저장소가 아니라 `wp-config.php` 
 define( 'PERSONAL_CTA_OPENAI_API_KEY', '...');
 ```
 
-환경변수에서는 `OPENAI_API_KEY`도 사용할 수 있습니다. 키는 관리자 HTML, JavaScript, REST 응답, 오류 로그에 출력하지 않습니다.
+`OPENAI_API_KEY`도 `wp-config.php` 상수 또는 환경변수로 사용할 수 있습니다. 키는 관리자 HTML, JavaScript, REST 응답, 오류 로그에 출력하지 않습니다.
 
 ## 설정과 사용
 
@@ -67,6 +67,6 @@ docker run --rm --mount $mount -w /app php:7.4-cli sh -lc "find . -path ./dist -
 
 1. `personal-cta-blocks.php`, `blocks/pulse-button/block.json`, `blocks/pulse-button/editor.asset.php` 버전을 같은 값으로 올립니다.
 2. `main`에 커밋·푸시하고 CI를 확인합니다.
-3. 같은 버전의 태그를 푸시합니다. 예: `git tag v0.3.0` 후 `git push origin v0.3.0`.
+3. 같은 버전의 태그를 푸시합니다. 예: `git tag v0.3.1` 후 `git push origin v0.3.1`.
 
 태그가 푸시되면 GitHub Actions가 설치 가능한 `personal-cta-blocks-{version}.zip`을 만들고 GitHub Release에 올립니다. 플러그인 폴더명과 메인 파일명은 기존 자동 업데이트 호환성을 위해 변경하지 않습니다.

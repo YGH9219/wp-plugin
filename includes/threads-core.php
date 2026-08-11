@@ -35,8 +35,13 @@ function personal_cta_threads_settings() {
  * @return string
  */
 function personal_cta_threads_config_secret( $constant, $environment ) {
-	if ( defined( $constant ) && is_string( constant( $constant ) ) ) {
-		return trim( constant( $constant ) );
+	foreach ( array_unique( array( $constant, $environment ) ) as $name ) {
+		if ( defined( $name ) && is_string( constant( $name ) ) ) {
+			$value = trim( constant( $name ) );
+			if ( '' !== $value ) {
+				return $value;
+			}
+		}
 	}
 
 	$value = getenv( $environment );
