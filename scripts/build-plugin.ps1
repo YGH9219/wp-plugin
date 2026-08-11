@@ -1,3 +1,7 @@
+param(
+	[switch]$Force
+)
+
 $ErrorActionPreference = 'Stop'
 
 $root = Split-Path -Parent $PSScriptRoot
@@ -15,18 +19,29 @@ $dist = Join-Path $root 'dist'
 $archivePath = Join-Path $dist "$slug-$version.zip"
 
 if (Test-Path $archivePath) {
-	throw "Archive already exists: $archivePath. Increase the plugin version before building a release."
+	if (-not $Force) {
+		throw "Archive already exists: $archivePath. Increase the plugin version before building a release."
+	}
+	$resolvedArchive = (Resolve-Path -LiteralPath $archivePath).Path
+	$resolvedDist = [System.IO.Path]::GetFullPath($dist)
+	if ([System.IO.Path]::GetDirectoryName($resolvedArchive) -ne $resolvedDist) {
+		throw "Refusing to replace an archive outside the dist directory: $resolvedArchive"
+	}
+	Remove-Item -LiteralPath $resolvedArchive -Force
 }
 
 New-Item -ItemType Directory -Force $dist | Out-Null
 Add-Type -AssemblyName System.IO.Compression
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 
-$files = @(
-	Get-Item -LiteralPath $pluginFile
-) + @(
-	Get-ChildItem -LiteralPath (Join-Path $root 'blocks') -File -Recurse
-)
+$files = @(Get-Item -LiteralPath $pluginFile)
+foreach ($runtimeDirectory in @('blocks', 'includes', 'assets')) {
+	$path = Join-Path $root $runtimeDirectory
+	if (-not (Test-Path -LiteralPath $path)) {
+		throw "Missing runtime directory: $runtimeDirectory"
+	}
+	$files += @(Get-ChildItem -LiteralPath $path -File -Recurse)
+}
 
 $archive = [System.IO.Compression.ZipFile]::Open(
 	$archivePath,
@@ -52,12 +67,22 @@ finally {
 $check = [System.IO.Compression.ZipFile]::OpenRead($archivePath)
 try {
 	$entryNames = @($check.Entries | ForEach-Object FullName)
-	if ($entryNames -contains "$slug/$slug.php" -and $entryNames -notmatch '\\') {
+	$requiredEntries = @(
+		"$slug/$slug.php",
+		"$slug/includes/threads-core.php",
+		"$slug/includes/threads-openai.php",
+		"$slug/includes/threads-meta.php",
+		"$slug/includes/threads-admin.php",
+		"$slug/assets/threads-admin.js",
+		"$slug/assets/threads-admin.css"
+	)
+	$missingEntries = @($requiredEntries | Where-Object { $entryNames -notcontains $_ })
+	if ($missingEntries.Count -eq 0 -and $entryNames -notmatch '\\') {
 		Write-Output "Built $archivePath"
 		return
 	}
 
-	throw 'The ZIP structure is not valid for a WordPress plugin.'
+	throw "The ZIP structure is not valid for a WordPress plugin. Missing: $($missingEntries -join ', ')"
 }
 finally {
 	$check.Dispose()

@@ -14,7 +14,18 @@ if ($block.version -ne $version) { throw 'Block and plugin versions do not match
 if ($block.keywords -notcontains 'ㅂㅌ') { throw 'The /ㅂㅌ inserter keyword is missing.' }
 if (-not $block.attributes.text -or -not $block.attributes.url) { throw 'Text or URL attributes are missing.' }
 
-@('personal-cta-blocks.php', 'blocks\pulse-button\editor.js', 'blocks\pulse-button\render.php', 'blocks\pulse-button\style.css') |
+@(
+	'personal-cta-blocks.php',
+	'blocks\pulse-button\editor.js',
+	'blocks\pulse-button\render.php',
+	'blocks\pulse-button\style.css',
+	'includes\threads-core.php',
+	'includes\threads-openai.php',
+	'includes\threads-meta.php',
+	'includes\threads-admin.php',
+	'assets\threads-admin.js',
+	'assets\threads-admin.css'
+) |
 	ForEach-Object {
 		if (-not (Test-Path (Join-Path $root $_))) { throw "Missing required file: $_" }
 	}
@@ -26,8 +37,20 @@ if (Test-Path $archivePath) {
 	$archive = [System.IO.Compression.ZipFile]::OpenRead($archivePath)
 	try {
 		$entries = @($archive.Entries | ForEach-Object FullName)
-		if ($entries -notcontains 'personal-cta-blocks/personal-cta-blocks.php') { throw 'Plugin ZIP is missing its main file.' }
+		$requiredEntries = @(
+			'personal-cta-blocks/personal-cta-blocks.php',
+			'personal-cta-blocks/includes/threads-core.php',
+			'personal-cta-blocks/includes/threads-openai.php',
+			'personal-cta-blocks/includes/threads-meta.php',
+			'personal-cta-blocks/includes/threads-admin.php',
+			'personal-cta-blocks/assets/threads-admin.js',
+			'personal-cta-blocks/assets/threads-admin.css'
+		)
+		foreach ($requiredEntry in $requiredEntries) {
+			if ($entries -notcontains $requiredEntry) { throw "Plugin ZIP is missing $requiredEntry." }
+		}
 		if ($entries -match '\\') { throw 'Plugin ZIP contains Windows-style paths.' }
+		if ($entries -match '^personal-cta-blocks/(tests|scripts|dist)/') { throw 'Plugin ZIP contains development files.' }
 	}
 	finally {
 		$archive.Dispose()

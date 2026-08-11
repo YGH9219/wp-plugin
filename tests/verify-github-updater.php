@@ -19,7 +19,9 @@ $test_release = array(
 
 function add_action( $hook, $callback ) {}
 function add_filter( $hook, $callback, $priority = 10, $accepted_args = 1 ) {}
+function register_deactivation_hook( $file, $callback ) {}
 function register_block_type( $path ) {}
+function plugin_dir_url( $file ) { return 'https://example.test/wp-content/plugins/personal-cta-blocks/'; }
 function plugin_basename( $file ) { return 'personal-cta-blocks/personal-cta-blocks.php'; }
 function wp_remote_get( $url, $args ) {
 	global $test_release;
