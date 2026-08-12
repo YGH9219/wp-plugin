@@ -260,6 +260,16 @@ function personal_cta_threads_rest_error( $error, $fallback = 500 ) {
 function personal_cta_threads_admin_state( $post_id ) {
 	$state   = personal_cta_threads_state( $post_id );
 	$ready   = 'ready' === $state['status'];
+	if ( $ready && function_exists( 'personal_cta_threads_source' ) ) {
+		$source     = personal_cta_threads_source( $post_id );
+		$saved_hash = (string) personal_cta_threads_meta( $post_id, 'source_hash' );
+		if ( is_wp_error( $source ) || '' === $saved_hash || ! hash_equals( $saved_hash, $source['hash'] ) ) {
+			personal_cta_threads_set_meta( $post_id, 'verifier_state', 'not_run' );
+			personal_cta_threads_set_state( $post_id, 'failed', 'source_changed', '원문이 변경됐습니다. 저장한 뒤 Threads 문구를 다시 생성하세요.' );
+			$state = personal_cta_threads_state( $post_id );
+			$ready = false;
+		}
+	}
 	$text    = $ready ? (string) $state['text'] : '';
 	$payload = '' === $text ? null : personal_cta_threads_payload_text( $post_id, $text );
 
@@ -299,11 +309,96 @@ function personal_cta_threads_diagnostic_copy( $copy ) {
 	if ( '' === $text ) {
 		return null;
 	}
+	$hook_id = '';
+	if ( isset( $copy['hook_id'] ) && is_string( $copy['hook_id'] ) ) {
+		$hook_id = $copy['hook_id'];
+	} elseif ( isset( $copy['hook_angle_id'] ) && is_string( $copy['hook_angle_id'] ) ) {
+		$hook_id = $copy['hook_angle_id'];
+	}
 
 	return array(
 		'text'          => $text,
 		'hook_angle_id' => is_array( $copy ) && isset( $copy['hook_angle_id'] ) && is_string( $copy['hook_angle_id'] ) ? $copy['hook_angle_id'] : '',
+		'structure_id'  => is_array( $copy ) && isset( $copy['structure_id'] ) && is_string( $copy['structure_id'] ) ? $copy['structure_id'] : '',
+		'hook_id'       => $hook_id,
 	);
+}
+
+/**
+ * Reduces a list to non-empty scalar strings for diagnostics.
+ *
+ * @param mixed $items Stored list.
+ * @return array<int, string>
+ */
+function personal_cta_threads_diagnostic_string_list( $items ) {
+	$output = array();
+	foreach ( is_array( $items ) ? $items : array() as $item ) {
+		if ( is_scalar( $item ) && '' !== trim( (string) $item ) ) {
+			$output[] = trim( (string) $item );
+		}
+	}
+
+	return array_values( array_unique( $output ) );
+}
+
+/**
+ * Returns only the safe strategy fields needed to inspect a generation.
+ *
+ * @param mixed $strategy Stored strategy.
+ * @return array<string, mixed>|null
+ */
+function personal_cta_threads_diagnostic_strategy( $strategy ) {
+	if ( ! is_array( $strategy ) || empty( $strategy ) ) {
+		return null;
+	}
+
+	$output = array();
+	foreach ( array( 'core_tension', 'reader_assumption', 'contrast', 'best_reveal', 'secondary_value' ) as $key ) {
+		$value = isset( $strategy[ $key ] ) ? $strategy[ $key ] : '';
+		$output[ $key ] = array(
+			'text'     => is_array( $value ) && isset( $value['text'] ) && is_scalar( $value['text'] )
+				? trim( (string) $value['text'] )
+				: ( is_scalar( $value ) ? trim( (string) $value ) : '' ),
+			'fact_ids' => personal_cta_threads_diagnostic_string_list( is_array( $value ) && isset( $value['fact_ids'] ) ? $value['fact_ids'] : array() ),
+		);
+	}
+	$output['boring_fact_ids']  = personal_cta_threads_diagnostic_string_list( isset( $strategy['boring_fact_ids'] ) ? $strategy['boring_fact_ids'] : array() );
+	$output['structures']        = array();
+	$output['selected_hook_ids'] = array();
+	foreach ( isset( $strategy['writer_plans'] ) && is_array( $strategy['writer_plans'] ) ? $strategy['writer_plans'] : array() as $plan ) {
+		if ( ! is_array( $plan ) ) {
+			continue;
+		}
+		$safe = array(
+			'writer_id'    => isset( $plan['writer_id'] ) && is_scalar( $plan['writer_id'] ) ? trim( (string) $plan['writer_id'] ) : '',
+			'structure_id' => isset( $plan['structure_id'] ) && is_scalar( $plan['structure_id'] ) ? trim( (string) $plan['structure_id'] ) : '',
+			'hook_id'      => isset( $plan['hook_id'] ) && is_scalar( $plan['hook_id'] ) ? trim( (string) $plan['hook_id'] ) : '',
+		);
+		if ( ! empty( array_filter( $safe ) ) ) {
+			$output['structures'][] = $safe;
+			$output['selected_hook_ids'][] = $safe['hook_id'];
+		}
+	}
+	$output['selected_hook_ids'] = personal_cta_threads_diagnostic_string_list( $output['selected_hook_ids'] );
+
+	$output['hooks'] = array();
+	foreach ( isset( $strategy['hooks'] ) && is_array( $strategy['hooks'] ) ? $strategy['hooks'] : array() as $item ) {
+		if ( ! is_array( $item ) ) {
+			continue;
+		}
+		$safe = array();
+		foreach ( array( 'id', 'text' ) as $key ) {
+			if ( isset( $item[ $key ] ) && is_scalar( $item[ $key ] ) ) {
+				$safe[ $key ] = trim( (string) $item[ $key ] );
+			}
+		}
+		$safe['fact_ids'] = personal_cta_threads_diagnostic_string_list( isset( $item['fact_ids'] ) ? $item['fact_ids'] : array() );
+		if ( ! empty( array_filter( $safe ) ) ) {
+			$output['hooks'][] = $safe;
+		}
+	}
+
+	return $output;
 }
 
 /**
@@ -313,15 +408,76 @@ function personal_cta_threads_diagnostic_copy( $copy ) {
  * @return array<string, mixed>
  */
 function personal_cta_threads_admin_diagnostics( $post_id ) {
-	$state  = personal_cta_threads_state( $post_id );
-	$stored = personal_cta_threads_meta( $post_id, 'drafts', array() );
-	$drafts = array();
-	foreach ( array( 'H1', 'H2', 'H3' ) as $id ) {
+	$state    = personal_cta_threads_state( $post_id );
+	$fact_map = personal_cta_threads_meta( $post_id, 'fact_map', array() );
+	$stored   = personal_cta_threads_meta( $post_id, 'drafts', array() );
+	$drafts   = array();
+	$order    = array_unique( array_merge( array( 'A', 'B', 'C', 'H1', 'H2', 'H3' ), is_array( $stored ) ? array_keys( $stored ) : array() ) );
+	foreach ( $order as $id ) {
 		$draft = is_array( $stored ) && isset( $stored[ $id ] ) ? personal_cta_threads_diagnostic_copy( $stored[ $id ] ) : null;
 		if ( is_array( $draft ) ) {
-			$draft['id'] = $id;
+			$draft['id'] = (string) $id;
 			$drafts[]    = $draft;
 		}
+	}
+
+	$safe_fact_map = null;
+	if ( is_array( $fact_map ) && ! empty( $fact_map ) ) {
+		$safe_fact_map = array(
+			'topic'            => isset( $fact_map['topic'] ) && is_scalar( $fact_map['topic'] ) ? trim( (string) $fact_map['topic'] ) : '',
+			'reader_situation' => isset( $fact_map['reader_situation'] ) && is_scalar( $fact_map['reader_situation'] )
+				? trim( (string) $fact_map['reader_situation'] )
+				: ( isset( $fact_map['reader_problem'] ) && is_scalar( $fact_map['reader_problem'] ) ? trim( (string) $fact_map['reader_problem'] ) : '' ),
+			'facts'            => array(),
+		);
+		foreach ( isset( $fact_map['facts'] ) && is_array( $fact_map['facts'] ) ? $fact_map['facts'] : array() as $fact ) {
+			if ( ! is_array( $fact ) ) {
+				continue;
+			}
+			$safe_fact_map['facts'][] = array(
+				'id'        => isset( $fact['id'] ) && is_scalar( $fact['id'] ) ? trim( (string) $fact['id'] ) : '',
+				'subject'   => isset( $fact['subject'] ) && is_scalar( $fact['subject'] ) ? trim( (string) $fact['subject'] ) : '',
+				'statement' => isset( $fact['statement'] ) && is_scalar( $fact['statement'] )
+					? trim( (string) $fact['statement'] )
+					: ( isset( $fact['claim'] ) && is_scalar( $fact['claim'] ) ? trim( (string) $fact['claim'] ) : '' ),
+			);
+		}
+	}
+
+	$editor_raw = personal_cta_threads_meta( $post_id, 'editor_result', array() );
+	$safe_editor = personal_cta_threads_diagnostic_copy( $editor_raw );
+
+	$quality      = personal_cta_threads_meta( $post_id, 'final_quality_result', array() );
+	$safe_quality = null;
+	if ( is_array( $quality ) && ! empty( $quality ) ) {
+		$quality_copy = isset( $quality['copy'] ) ? $quality['copy'] : $quality;
+		if ( ! is_string( $quality_copy ) && ( ! is_array( $quality_copy ) || empty( $quality_copy['text'] ) ) ) {
+			$quality_copy = $editor_raw;
+		}
+		if ( is_string( $quality_copy ) ) {
+			$quality_copy = array( 'text' => $quality_copy );
+		}
+		$safe_quality = array(
+			'decision' => isset( $quality['decision'] ) && is_scalar( $quality['decision'] ) ? trim( (string) $quality['decision'] ) : '',
+			'issues'   => personal_cta_threads_diagnostic_string_list( isset( $quality['issues'] ) ? $quality['issues'] : array() ),
+			'copy'     => null,
+		);
+		$safe_quality_copy = personal_cta_threads_diagnostic_copy( $quality_copy );
+		if ( is_array( $safe_quality_copy ) ) {
+			$safe_quality['copy'] = array( 'text' => $safe_quality_copy['text'] );
+		}
+	}
+
+	$verifier      = personal_cta_threads_meta( $post_id, 'verifier_result', array() );
+	$verifier      = is_array( $verifier ) ? $verifier : array();
+	$verifier_state = (string) personal_cta_threads_meta( $post_id, 'verifier_state', 'not_run' );
+	$safe_verifier = null;
+	if ( ! empty( $verifier ) || 'not_run' !== $verifier_state ) {
+		$safe_verifier = array(
+			'state'    => sanitize_key( $verifier_state ),
+			'decision' => isset( $verifier['decision'] ) && is_scalar( $verifier['decision'] ) ? trim( (string) $verifier['decision'] ) : '',
+			'issues'   => personal_cta_threads_diagnostic_string_list( isset( $verifier['issues'] ) ? $verifier['issues'] : array() ),
+		);
 	}
 
 	$final = null;
@@ -331,12 +487,17 @@ function personal_cta_threads_admin_diagnostics( $post_id ) {
 	}
 
 	return array(
-		'status' => $state['status'],
-		'stage'  => $state['stage'],
-		'drafts' => $drafts,
-		'editor' => personal_cta_threads_diagnostic_copy( personal_cta_threads_meta( $post_id, 'editor_result', array() ) ),
-		'repair' => personal_cta_threads_diagnostic_copy( personal_cta_threads_meta( $post_id, 'repair_result', array() ) ),
-		'final'  => $final,
+		'status'        => $state['status'],
+		'stage'         => $state['stage'],
+		'fact_map'      => $safe_fact_map,
+		'strategy'      => personal_cta_threads_diagnostic_strategy( personal_cta_threads_meta( $post_id, 'strategy', array() ) ),
+		'drafts'        => $drafts,
+		'editor_raw'    => $safe_editor,
+		'editor'        => $safe_editor,
+		'final_quality' => $safe_quality,
+		'repair'        => personal_cta_threads_diagnostic_copy( personal_cta_threads_meta( $post_id, 'repair_result', array() ) ),
+		'verifier'      => $safe_verifier,
+		'final'         => $final,
 	);
 }
 

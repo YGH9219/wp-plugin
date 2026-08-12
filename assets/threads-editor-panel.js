@@ -33,25 +33,27 @@
 	};
 	const stages = {
 		retry_wait: '일시 오류 후 현재 단계를 한 번 다시 시도하는 중',
-		editor_retry: '5/6 최종 문구 편집을 압축해 한 번 복구',
+		editor_retry: '6/8 최종 문구 편집을 압축해 한 번 복구',
 		queued: '대기열에 등록됨',
 		waiting_lock: '다른 작업이 끝나길 기다리는 중',
-		fact: '1/6 원문의 숫자·조건 분석',
-		writer_h1: '2/6 초안 1/3 작성',
-		writer_h1_complete: '2/6 초안 1/3 완료',
-		writer_h2: '3/6 초안 2/3 작성',
-		writer_h2_complete: '3/6 초안 2/3 완료',
-		writer_h3: '4/6 초안 3/3 작성',
-		writer_h3_complete: '4/6 초안 3/3 완료',
-		editor: '5/6 최종 문구 편집',
-		editor_complete: '5/6 최종 문구 점검',
-		quality: '6/6 전환력 품질 심사',
-		quality_complete: '6/6 전환력 심사 완료',
-		conversion_repair: '전환력 기준에 맞춰 1회 보정',
-		conversion_repair_complete: '전환력 보정 완료',
+		fact: '1/8 원자 사실 추출',
+		strategy: '2/8 콘텐츠 전략·Hook 설계',
+		writer_a: '3/8 Writer A 초안 작성',
+		writer_a_complete: '3/8 Writer A 초안 완료',
+		writer_b: '4/8 Writer B 초안 작성',
+		writer_b_complete: '4/8 Writer B 초안 완료',
+		writer_c: '5/8 Writer C 초안 작성',
+		writer_c_complete: '5/8 Writer C 초안 완료',
+		editor: '6/8 Chief Editor 최종 문구 편집',
+		editor_complete: '6/8 Chief Editor 편집 완료',
+		quality: '7/8 최종 문체·전환력 심사',
+		quality_complete: '7/8 최종 품질 심사 완료',
 		literal_repair: '필수 숫자·조건 보정',
 		repair: '500자 제한에 맞춰 정리',
 		repair_complete: '최종 길이 점검',
+		source_changed: '저장된 원문 변경 감지',
+		verifier: '8/8 원문 기반 사실 검증',
+		verified: '8/8 사실 검증 완료',
 		ready: '완료',
 	};
 
@@ -121,6 +123,32 @@
 		}
 	}
 
+	function diagnosticJson( value ) {
+		try {
+			return JSON.stringify( value, null, 2 );
+		} catch ( ignored ) {
+			return '';
+		}
+	}
+
+	function diagnosticDecision( value, includeCopy ) {
+		if ( ! value || typeof value !== 'object' || Array.isArray( value ) ) {
+			return '';
+		}
+		const lines = [
+			'판정: ' + ( value.decision || '기록 없음' ),
+			'이슈: ' + ( Array.isArray( value.issues ) && value.issues.length ? value.issues.join( ', ' ) : '없음' ),
+		];
+		if ( value.state ) {
+			lines.unshift( '상태: ' + value.state );
+		}
+		if ( includeCopy && value.copy && value.copy.text ) {
+			lines.push( '', value.copy.text );
+		}
+
+		return lines.join( '\n' );
+	}
+
 	function ThreadsCopyPanel() {
 		const postId = useSelect( function ( select ) {
 			const editor = select( 'core/editor' );
@@ -131,6 +159,11 @@
 			const editor = select( 'core/editor' );
 
 			return editor && editor.getEditedPostAttribute ? editor.getEditedPostAttribute( 'status' ) : '';
+		}, [] );
+		const hasUnsavedChanges = useSelect( function ( select ) {
+			const editor = select( 'core/editor' );
+
+			return Boolean( editor && editor.isEditedPostDirty && editor.isEditedPostDirty() );
 		}, [] );
 		const [ state, setState ] = useState( { status: 'idle', text: '', copy_text: '', poll: false } );
 		const [ busy, setBusy ] = useState( false );
@@ -176,8 +209,10 @@
 			setMessage( '' );
 			setDiagnostic( null );
 			setDiagnosticError( '' );
-			loadState();
-		}, [ postId ] );
+			if ( ! hasUnsavedChanges ) {
+				loadState();
+			}
+		}, [ postId, hasUnsavedChanges ] );
 
 		useEffect( function () {
 			if ( ! postId || ! state.poll ) {
@@ -209,6 +244,10 @@
 		}, [ postId, diagnosticOpen, state.poll ] );
 
 		function generate( regenerate ) {
+			if ( hasUnsavedChanges ) {
+				setError( '글을 먼저 저장한 뒤 저장된 원문으로 Threads 문구를 생성하세요.' );
+				return;
+			}
 			setError( '' );
 			setDiagnostic( null );
 			setDiagnosticError( '' );
@@ -261,29 +300,65 @@
 
 		const working = Boolean( state.poll );
 		const published = 'publish' === postStatus;
-		const copyText = state.copy_text || '';
+		const copyText = hasUnsavedChanges ? '' : ( state.copy_text || '' );
 		const activityAt = Number( state.last_heartbeat || state.updated_at || 0 );
 		const stale = working && activityAt && Math.floor( Date.now() / 1000 ) - activityAt >= 420;
 		const status = working
 			? ( busy && message ? message : ( labels[ state.status ] || ( '상태: ' + state.status ) ) )
 			: ( message || labels[ state.status ] || ( '상태: ' + state.status ) );
 		const displayedError = error || ( 'failed' === state.status ? state.last_error : '' );
-		const disabled = ! postId || ! published || busy || working;
+		const disabled = ! postId || ! published || hasUnsavedChanges || busy || working;
 		const diagnosticDrafts = diagnostic && Array.isArray( diagnostic.drafts ) ? diagnostic.drafts : [];
-		const diagnosticEntries = diagnosticDrafts.map( function ( draft ) {
-			return {
-				label: 'Writer 초안 ' + draft.id + ( draft.hook_angle_id ? ' (' + draft.hook_angle_id + ')' : '' ),
-				copy: draft,
+		const diagnosticEntries = [];
+		if ( diagnostic && diagnostic.fact_map ) {
+			diagnosticEntries.push( { label: '1. FACT MAP', value: diagnosticJson( diagnostic.fact_map ), rows: 12 } );
+		}
+		if ( diagnostic && diagnostic.strategy ) {
+			const strategySummary = {
+				core_tension: diagnostic.strategy.core_tension || '',
+				reader_assumption: diagnostic.strategy.reader_assumption || '',
+				contrast: diagnostic.strategy.contrast || '',
+				best_reveal: diagnostic.strategy.best_reveal || '',
+				secondary_value: diagnostic.strategy.secondary_value || '',
+				boring_fact_ids: Array.isArray( diagnostic.strategy.boring_fact_ids ) ? diagnostic.strategy.boring_fact_ids : [],
 			};
+			diagnosticEntries.push( { label: '2. CONTENT STRATEGY', value: diagnosticJson( strategySummary ), rows: 10 } );
+			if ( Array.isArray( diagnostic.strategy.structures ) && diagnostic.strategy.structures.length ) {
+				diagnosticEntries.push( { label: '3. Writer 구조', value: diagnosticJson( diagnostic.strategy.structures ), rows: 9 } );
+			}
+			if ( Array.isArray( diagnostic.strategy.hooks ) && diagnostic.strategy.hooks.length ) {
+				diagnosticEntries.push( {
+					label: '4. Hook 후보 / 선택: ' + ( Array.isArray( diagnostic.strategy.selected_hook_ids ) && diagnostic.strategy.selected_hook_ids.length ? diagnostic.strategy.selected_hook_ids.join( ', ' ) : '없음' ),
+					value: diagnosticJson( diagnostic.strategy.hooks ),
+					rows: 12,
+				} );
+			}
+		}
+		diagnosticDrafts.forEach( function ( draft, index ) {
+			const structureId = draft.structure_id || '';
+			const hookId = draft.hook_id || draft.hook_angle_id || draft.id || '';
+			const details = [ structureId ? '구조 ' + structureId : '', hookId ? 'Hook ' + hookId : '' ].filter( Boolean ).join( ' / ' );
+			diagnosticEntries.push( {
+				label: '5. Writer 초안 ' + ( index + 1 ) + ( details ? ' (' + details + ')' : '' ),
+				value: draft.text || '',
+				rows: 8,
+			} );
 		} );
-		if ( diagnostic && diagnostic.editor ) {
-			diagnosticEntries.push( { label: 'Chief Editor 결과' + ( diagnostic.editor.hook_angle_id ? ' (' + diagnostic.editor.hook_angle_id + ')' : '' ), copy: diagnostic.editor } );
+		const editorRaw = diagnostic && ( diagnostic.editor_raw || diagnostic.editor );
+		if ( editorRaw ) {
+			diagnosticEntries.push( { label: '6. Chief Editor 원본', value: editorRaw.text || '', rows: 8 } );
+		}
+		if ( diagnostic && diagnostic.final_quality ) {
+			diagnosticEntries.push( { label: '7. Final Quality', value: diagnosticDecision( diagnostic.final_quality, true ), rows: 9 } );
 		}
 		if ( diagnostic && diagnostic.repair ) {
-			diagnosticEntries.push( { label: '최종 보정 결과', copy: diagnostic.repair } );
+			diagnosticEntries.push( { label: '8. 최종 보정 결과', value: diagnostic.repair.text || '', rows: 8 } );
+		}
+		if ( diagnostic && diagnostic.verifier ) {
+			diagnosticEntries.push( { label: '9. Fact Verifier', value: diagnosticDecision( diagnostic.verifier, false ), rows: 5 } );
 		}
 		if ( diagnostic && diagnostic.final ) {
-			diagnosticEntries.push( { label: '최종 생성 문구 (보정 후)', copy: diagnostic.final } );
+			diagnosticEntries.push( { label: '10. 최종 생성 문구', value: diagnostic.final.text || '', rows: 8 } );
 		}
 
 		return createElement(
@@ -299,6 +374,7 @@
 				PanelBody,
 				{ initialOpen: true },
 				! published && createElement( Notice, { status: 'warning', isDismissible: false }, '글을 먼저 발행하면 문구를 만들 수 있습니다.' ),
+				hasUnsavedChanges && createElement( Notice, { status: 'warning', isDismissible: false }, '현재 편집 내용을 먼저 저장하세요. 문구는 저장된 글을 기준으로 만듭니다.' ),
 				createElement( 'p', { className: 'pct-threads-editor-status', role: 'status', 'aria-live': 'polite' },
 					working && createElement( Spinner, null ),
 					status
@@ -335,17 +411,17 @@
 						setDiagnosticOpen( nextOpen );
 					},
 				},
-				createElement( 'p', { className: 'pct-threads-editor-progress' }, 'Writer 초안과 편집장 결과를 비교합니다. 원문과 API 정보는 표시하지 않습니다.' ),
+				createElement( 'p', { className: 'pct-threads-editor-progress' }, 'FACT MAP부터 최종 검증까지 저장된 생성 단계를 비교합니다. 원문과 API 정보는 표시하지 않습니다.' ),
 				diagnosticOpen && createElement( Button, { variant: 'secondary', onClick: loadDiagnostics, disabled: diagnosticBusy }, '진단 새로고침' ),
 				diagnosticBusy && createElement( Spinner, null ),
 				diagnosticError && createElement( Notice, { status: 'error', isDismissible: false }, diagnosticError ),
 				diagnosticOpen && diagnostic && ! diagnosticEntries.length && createElement( Notice, { status: 'info', isDismissible: false }, '아직 저장된 생성 단계가 없습니다.' ),
 				diagnosticOpen && diagnosticEntries.map( function ( entry ) {
 					return createElement( TextareaControl, {
-						key: entry.label,
+						key: entry.label + entry.value.slice( 0, 24 ),
 						label: entry.label,
-						value: entry.copy.text || '',
-						rows: 8,
+						value: entry.value,
+						rows: entry.rows || 8,
 						readOnly: true,
 					} );
 				} )

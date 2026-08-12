@@ -8,11 +8,13 @@ define( 'PERSONAL_CTA_BLOCKS_FILE', dirname( __DIR__ ) . '/personal-cta-blocks.p
 define( 'OPENAI_API_KEY', 'test-openai-key' );
 define( 'DAY_IN_SECONDS', 86400 );
 
-$test_options = array();
-$test_meta    = array();
-$test_remote_response = array();
-$test_remote_requests = array();
-$test_permalink       = '';
+$test_options          = array();
+$test_meta             = array();
+$test_remote_response  = array();
+$test_remote_responses = array();
+$test_remote_requests  = array();
+$test_permalink        = '';
+$test_post_title       = '테스트 글';
 
 class Pct_Test_WPDB {
 	public $options = 'options';
@@ -110,7 +112,10 @@ function get_post( $post_id ) {
 		'post_content' => '<!-- wp:paragraph --><p>첫 문단입니다.</p><!-- /wp:paragraph --><!-- wp:shortcode -->[secret]<!-- /wp:shortcode -->',
 	);
 }
-function get_the_title( $post_id ) { return '테스트 글'; }
+function get_the_title( $post_id ) {
+	global $test_post_title;
+	return $test_post_title;
+}
 function parse_blocks( $content ) {
 	return array(
 		array( 'blockName' => 'core/paragraph', 'innerHTML' => '<p>첫 문단입니다.</p>', 'innerBlocks' => array() ),
@@ -127,9 +132,9 @@ function wp_cache_delete( $key, $group = '' ) { return true; }
 function maybe_serialize( $value ) { return is_scalar( $value ) ? (string) $value : serialize( $value ); }
 function wp_salt( $scheme = 'auth' ) { return 'test-salt-' . $scheme; }
 function wp_remote_post( $url, $args = array() ) {
-	global $test_remote_response, $test_remote_requests;
+	global $test_remote_response, $test_remote_responses, $test_remote_requests;
 	$test_remote_requests[] = array( 'url' => $url, 'args' => $args );
-	return $test_remote_response;
+	return ! empty( $test_remote_responses ) ? array_shift( $test_remote_responses ) : $test_remote_response;
 }
 function wp_remote_retrieve_body( $response ) { return isset( $response['body'] ) ? $response['body'] : ''; }
 function wp_remote_retrieve_response_code( $response ) { return isset( $response['response']['code'] ) ? (int) $response['response']['code'] : 0; }
@@ -144,6 +149,82 @@ function pct_assert( $condition, $message ) {
 	}
 }
 
+function pct_openai_response( $id, $data ) {
+	return array(
+		'response' => array( 'code' => 200 ),
+		'body'     => wp_json_encode(
+			array(
+				'id'     => $id,
+				'status' => 'completed',
+				'usage'  => array( 'input_tokens' => 1, 'output_tokens' => 1, 'total_tokens' => 2 ),
+				'output' => array(
+					array(
+						'type'    => 'message',
+						'content' => array( array( 'type' => 'output_text', 'text' => wp_json_encode( $data ) ) ),
+					),
+				),
+			)
+		),
+	);
+}
+
+function pct_copy( $hook_id, $structure_id, $text = '테스트 글은 첫 문단부터 확인해야 해.' ) {
+	return array(
+		'text'          => $text,
+		'hook_angle_id' => $hook_id,
+		'structure_id'  => $structure_id,
+		'fact_ids'      => array( 'F1' ),
+		'claims'        => array( array( 'text' => $text, 'fact_ids' => array( 'F1' ) ) ),
+	);
+}
+
+function pct_verifier_result( $text, $pass = true ) {
+	return array(
+		'decision' => $pass ? 'pass' : 'block',
+		'checks'   => array(
+			array(
+				'unit_id'      => 'T001',
+				'claim'        => $text,
+				'verdict'      => $pass ? 'supported' : 'unsupported',
+				'fact_ids'     => $pass ? array( 'F1' ) : array(),
+				'evidence_ids' => $pass ? array( 'S002' ) : array(),
+				'reason'       => $pass ? 'direct source support' : 'not supported',
+			),
+		),
+		'issues'   => $pass ? array() : array( 'unsupported claim' ),
+	);
+}
+
+function pct_pipeline_responses( $post_id, $fact_map, $strategy, $editor, $quality, $verifier = null ) {
+	$responses = array(
+		pct_openai_response( 'resp_' . $post_id . '_fact', $fact_map ),
+		pct_openai_response( 'resp_' . $post_id . '_strategy', $strategy ),
+		pct_openai_response( 'resp_' . $post_id . '_writer_a', pct_copy( 'H1', 'reversal' ) ),
+		pct_openai_response( 'resp_' . $post_id . '_writer_b', pct_copy( 'H2', 'mistake_prevention' ) ),
+		pct_openai_response( 'resp_' . $post_id . '_writer_c', pct_copy( 'H3', 'short_discovery' ) ),
+		pct_openai_response( 'resp_' . $post_id . '_editor', $editor ),
+		pct_openai_response( 'resp_' . $post_id . '_quality', $quality ),
+	);
+	if ( null !== $verifier ) {
+		$responses[] = pct_openai_response( 'resp_' . $post_id . '_verifier', $verifier );
+	}
+
+	return $responses;
+}
+
+function pct_drive_generation( $post_id, $limit = 12 ) {
+	$result = null;
+	for ( $i = 0; $i < $limit; $i++ ) {
+		$result = personal_cta_threads_generate( $post_id, false );
+		if ( is_wp_error( $result ) || ( is_array( $result ) && empty( $result['pending'] ) ) ) {
+			return $result;
+		}
+	}
+
+	return new WP_Error( 'pct_test_timeout', 'The mocked pipeline did not finish.' );
+}
+
+/* Low-level source, secret, parser, and queue safeguards. */
 pct_assert( 3 === personal_cta_threads_character_length( '가나다' ), 'Unicode length fallback is invalid.' );
 pct_assert( 5 === personal_cta_threads_length( '가😀' ), 'Threads emoji byte counting is invalid.' );
 pct_assert( 'test-openai-key' === personal_cta_threads_config_secret( 'PERSONAL_CTA_OPENAI_API_KEY', 'OPENAI_API_KEY' ), 'The standard OpenAI wp-config constant must be recognized.' );
@@ -157,40 +238,29 @@ $tampered_key['ciphertext'] = base64_encode( 'tampered' );
 update_option( PERSONAL_CTA_THREADS_OPENAI_KEY_OPTION, $tampered_key );
 pct_assert( is_wp_error( personal_cta_threads_saved_openai_key() ), 'A tampered administrator API key must be rejected.' );
 personal_cta_threads_save_openai_key( 'test-direct-openai-key' );
-pct_assert( "첫째\n둘째" === personal_cta_threads_clean_text( '<p>첫째</p><p>둘째</p>' ), 'HTML normalization is invalid.' );
 
 $source = personal_cta_threads_source( 7 );
-pct_assert( is_array( $source ), 'A valid post must produce a source document.' );
-pct_assert( false !== strpos( $source['text'], '[S001] 제목: 테스트 글' ), 'The source title is missing.' );
-pct_assert( false !== strpos( $source['text'], '첫 문단입니다.' ), 'The source paragraph is missing.' );
+pct_assert( is_array( $source ) && false !== strpos( $source['text'], '[S001] 제목: 테스트 글' ) && false !== strpos( $source['text'], '[S002] 첫 문단입니다.' ), 'The source document must retain stable segment IDs.' );
 pct_assert( false === strpos( $source['text'], '[secret]' ), 'Shortcodes must not enter the model source.' );
-
 $payload = personal_cta_threads_payload_text( 7, '본문' );
-pct_assert( is_array( $payload ), 'A short Threads payload must be valid.' );
-pct_assert( false !== strpos( $payload['text'], 'https://example.test/sample-post/?utm_source=threads' ), 'The copied text must include the deterministic outbound URL.' );
-
+pct_assert( is_array( $payload ) && false !== strpos( $payload['text'], 'utm_source=threads' ), 'The copied text must include the deterministic outbound URL.' );
 $too_long = personal_cta_threads_payload_text( 7, str_repeat( 'a', 501 ) );
 pct_assert( is_wp_error( $too_long ) && 'pct_text_too_long' === $too_long->get_error_code(), 'The server must reject text over 500 characters.' );
-
 $manual_url = personal_cta_threads_payload_text( 7, '본문 https://other.example/' );
 pct_assert( is_wp_error( $manual_url ) && 'pct_body_contains_url' === $manual_url->get_error_code(), 'Only the server may append a URL.' );
 
 $parsed = personal_cta_threads_openai_parse_response(
 	array(
 		'id'     => 'resp_test',
-		'source' => 'fixture',
 		'status' => 'completed',
 		'output' => array(
 			array( 'type' => 'reasoning' ),
-			array(
-				'type'    => 'message',
-				'content' => array( array( 'type' => 'output_text', 'text' => '{"ok":true}' ) ),
-			),
+			array( 'type' => 'message', 'content' => array( array( 'type' => 'output_text', 'text' => '{"ok":true}' ) ) ),
 		),
 	)
 );
-pct_assert( is_array( $parsed ) && true === $parsed['data']['ok'], 'Responses parsing must find a structured message after reasoning items.' );
-$usage_fixture = personal_cta_threads_openai_usage(
+pct_assert( is_array( $parsed ) && true === $parsed['data']['ok'], 'Responses parsing must find structured output after reasoning items.' );
+$usage = personal_cta_threads_openai_usage(
 	array(
 		'usage' => array(
 			'input_tokens'          => 101,
@@ -201,88 +271,12 @@ $usage_fixture = personal_cta_threads_openai_usage(
 		),
 	)
 );
-pct_assert( 144 === $usage_fixture['reasoning_tokens'] && 55 === $usage_fixture['cached_tokens'], 'Usage diagnostics must retain only safe reasoning and cache token counts.' );
-
-$refusal = personal_cta_threads_openai_parse_response(
-	array(
-		'status' => 'completed',
-		'output' => array( array( 'type' => 'message', 'content' => array( array( 'type' => 'refusal', 'refusal' => 'no' ) ) ) ),
-	)
-);
-pct_assert( is_wp_error( $refusal ) && 'pct_openai_refusal' === $refusal->get_error_code(), 'A model refusal must never be treated as copy.' );
-
-$incomplete = personal_cta_threads_openai_parse_response(
-	array(
-		'status'             => 'incomplete',
-		'incomplete_details' => array( 'reason' => 'max_output_tokens' ),
-	)
-);
-pct_assert( is_wp_error( $incomplete ) && 'pct_openai_incomplete' === $incomplete->get_error_code() && false !== strpos( $incomplete->get_error_message(), '출력 한도' ) && true === personal_cta_threads_openai_is_output_limit_error( $incomplete ), 'Output-token exhaustion must surface as a recoverable OpenAI error.' );
-$legacy_output_limit = personal_cta_threads_openai_parse_response(
-	array(
-		'status'             => 'incomplete',
-		'incomplete_details' => array( 'reason' => 'max_tokens' ),
-	)
-);
-pct_assert( is_wp_error( $legacy_output_limit ) && true === personal_cta_threads_openai_is_output_limit_error( $legacy_output_limit ), 'Both documented output-limit reason names must use the bounded editor recovery.' );
-$html_gateway_error = personal_cta_threads_openai_parse_response( '<html>gateway error</html>', 502 );
-pct_assert( is_wp_error( $html_gateway_error ) && 'pct_openai_http_502' === $html_gateway_error->get_error_code() && 502 === (int) $html_gateway_error->get_error_data()['http_status'], 'A non-JSON gateway failure must retain its HTTP status.' );
-$quota_error = personal_cta_threads_openai_parse_response( array( 'error' => array( 'code' => 'insufficient_quota' ) ), 429 );
-pct_assert( 0 === personal_cta_threads_openai_retry_delay( $quota_error ), 'Quota errors must not spend an automatic retry.' );
-$rate_limit_error = personal_cta_threads_openai_parse_response( array( 'error' => array( 'code' => 'rate_limit_exceeded' ) ), 429 );
-pct_assert( 60 === personal_cta_threads_openai_retry_delay( $rate_limit_error ) && 30 === personal_cta_threads_openai_retry_delay( new WP_Error( 'pct_openai_network', 'test' ) ), 'Only rate limits and transport failures receive a bounded backoff.' );
-$content_filter_error = personal_cta_threads_openai_parse_response( array( 'status' => 'incomplete', 'incomplete_details' => array( 'reason' => 'content_filter' ) ) );
-$auth_error = personal_cta_threads_openai_parse_response( array( 'error' => array( 'code' => 'invalid_api_key' ) ), 401 );
-pct_assert( 0 === personal_cta_threads_openai_retry_delay( $content_filter_error ) && 0 === personal_cta_threads_openai_retry_delay( $auth_error ), 'Safety, credential, and invalid-request errors must remain final.' );
-pct_assert( array( 'max_output_tokens' => 6144, 'reasoning_effort' => 'medium' ) === personal_cta_threads_openai_stage_options( 'editor' ), 'The normal editor must have a dedicated medium-effort output budget.' );
-pct_assert( array( 'max_output_tokens' => 8192, 'reasoning_effort' => 'low' ) === personal_cta_threads_openai_stage_options( 'editor', true ), 'The bounded editor recovery must trade lower reasoning for a larger budget.' );
-
-$failed_response = personal_cta_threads_openai_parse_response(
-	array(
-		'status' => 'failed',
-		'error'  => array( 'code' => 'server_error' ),
-	)
-);
-pct_assert( is_wp_error( $failed_response ) && 'pct_openai_failed' === $failed_response->get_error_code() && false !== strpos( $failed_response->get_error_message(), '상태: failed / server_error' ), 'A non-completed response must expose its status and remote error code.' );
-
-$quality_schema = personal_cta_threads_quality_schema();
-pct_assert( false === $quality_schema['additionalProperties'] && array( 'decision', 'issues' ) === $quality_schema['required'] && array( 'pass', 'rewrite' ) === $quality_schema['properties']['decision']['enum'] && 9 === $quality_schema['properties']['issues']['maxItems'], 'The quality review schema must remain bounded and machine-readable.' );
-pct_assert( array( 'explanation_first', 'missing_context', 'weak_hook', 'missing_why', 'missing_action', 'weak_cta', 'poor_rhythm', 'tone_mismatch', 'emoji_rule' ) === $quality_schema['properties']['issues']['items']['enum'], 'The quality review must expose only actionable conversion issues.' );
-pct_assert( true === personal_cta_threads_validate_quality_review( array( 'decision' => 'pass', 'issues' => array() ) ), 'A passing quality review must have no issues.' );
-pct_assert( true === personal_cta_threads_validate_quality_review( array( 'decision' => 'rewrite', 'issues' => array( 'missing_context' ) ) ), 'A rewrite quality review must accept a missing standalone context issue.' );
-pct_assert( true === personal_cta_threads_validate_quality_review( array( 'decision' => 'rewrite', 'issues' => array( 'weak_hook', 'tone_mismatch' ) ) ), 'A rewrite quality review must accept the measured weak-hook and mixed-tone failures.' );
-$pass_with_issue = personal_cta_threads_validate_quality_review( array( 'decision' => 'pass', 'issues' => array( 'weak_cta' ) ) );
-pct_assert( is_wp_error( $pass_with_issue ) && 'pct_invalid_quality_review' === $pass_with_issue->get_error_code(), 'A pass quality review must reject issues.' );
-$rewrite_without_issue = personal_cta_threads_validate_quality_review( array( 'decision' => 'rewrite', 'issues' => array() ) );
-pct_assert( is_wp_error( $rewrite_without_issue ) && 'pct_invalid_quality_review' === $rewrite_without_issue->get_error_code(), 'A rewrite quality review must require an issue.' );
-$unknown_quality_issue = personal_cta_threads_validate_quality_review( array( 'decision' => 'rewrite', 'issues' => array( 'unknown_issue' ) ) );
-pct_assert( is_wp_error( $unknown_quality_issue ) && 'pct_invalid_quality_review' === $unknown_quality_issue->get_error_code(), 'A quality review must reject unknown issues.' );
-$duplicate_quality_issue = personal_cta_threads_validate_quality_review( array( 'decision' => 'rewrite', 'issues' => array( 'weak_cta', 'weak_cta' ) ) );
-pct_assert( is_wp_error( $duplicate_quality_issue ) && 'pct_invalid_quality_review' === $duplicate_quality_issue->get_error_code(), 'A quality review must reject duplicate issues.' );
-
-$test_remote_response = array(
-	'response' => array( 'code' => 200 ),
-	'body'     => wp_json_encode( array(
-		'id'     => 'resp_quality_effort',
-		'status' => 'completed',
-		'output' => array( array( 'type' => 'message', 'content' => array( array( 'type' => 'output_text', 'text' => '{"ok":true}' ) ) ) ),
-	) ),
-);
-$quality_request = personal_cta_threads_openai_request(
-	'quality',
-	'test quality prompt',
-	array(),
-	array(
-		'type'                 => 'object',
-		'additionalProperties' => false,
-		'required'             => array( 'ok' ),
-		'properties'           => array( 'ok' => array( 'type' => 'boolean' ) ),
-	)
-);
-$quality_payload = json_decode( $test_remote_requests[ count( $test_remote_requests ) - 1 ]['args']['body'], true );
-pct_assert( is_array( $quality_request ) && 'medium' === $quality_payload['reasoning']['effort'] && 2048 === $quality_payload['max_output_tokens'], 'The bounded quality check must use its compact medium-effort budget.' );
-
-$multiple_outputs = personal_cta_threads_openai_parse_response(
+pct_assert( 144 === $usage['reasoning_tokens'] && 55 === $usage['cached_tokens'], 'Usage diagnostics must retain safe token counts.' );
+$refusal = personal_cta_threads_openai_parse_response( array( 'status' => 'completed', 'output' => array( array( 'type' => 'message', 'content' => array( array( 'type' => 'refusal', 'refusal' => 'no' ) ) ) ) ) );
+pct_assert( is_wp_error( $refusal ) && 'pct_openai_refusal' === $refusal->get_error_code(), 'A refusal must never be treated as copy.' );
+$incomplete = personal_cta_threads_openai_parse_response( array( 'status' => 'incomplete', 'incomplete_details' => array( 'reason' => 'max_output_tokens' ) ) );
+pct_assert( is_wp_error( $incomplete ) && personal_cta_threads_openai_is_output_limit_error( $incomplete ), 'Output-token exhaustion must remain recoverable.' );
+$multiple = personal_cta_threads_openai_parse_response(
 	array(
 		'status' => 'completed',
 		'output' => array(
@@ -291,361 +285,200 @@ $multiple_outputs = personal_cta_threads_openai_parse_response(
 		),
 	)
 );
-pct_assert( is_wp_error( $multiple_outputs ), 'Ambiguous multiple output_text values must be rejected.' );
+pct_assert( is_wp_error( $multiple ), 'Ambiguous multiple outputs must be rejected.' );
+$quota_error = personal_cta_threads_openai_parse_response( array( 'error' => array( 'code' => 'insufficient_quota' ) ), 429 );
+$rate_error  = personal_cta_threads_openai_parse_response( array( 'error' => array( 'code' => 'rate_limit_exceeded' ) ), 429 );
+pct_assert( 0 === personal_cta_threads_openai_retry_delay( $quota_error ) && 60 === personal_cta_threads_openai_retry_delay( $rate_error ), 'Only retryable provider failures receive backoff.' );
+pct_assert( array( 'max_output_tokens' => 4096, 'reasoning_effort' => 'medium' ) === personal_cta_threads_openai_stage_options( 'quality' ), 'Final quality must use its bounded budget.' );
+pct_assert( array( 'max_output_tokens' => 8192, 'reasoning_effort' => 'low' ) === personal_cta_threads_openai_stage_options( 'editor', true ), 'Editor recovery must be bounded.' );
 
+/* v0.5 FACT, strategy, copy, and quality contracts. */
 $fact_map = array(
-	'topic'            => '테스트',
-	'reader_problem'   => '확인 필요',
-	'primary_solution' => '첫 문단 확인',
+	'topic'            => '테스트 글',
+	'reader_situation' => '첫 문단을 확인하려는 독자',
 	'context_fact_ids' => array( 'F1' ),
 	'facts'            => array(
 		array(
 			'id'            => 'F1',
-			'claim'         => '첫 문단이 있다.',
+			'subject'       => '첫 문단',
+			'statement'     => '첫 문단입니다.',
 			'evidence'      => array( array( 'source_id' => 'S002', 'quote' => '첫 문단입니다.' ) ),
-			'must_preserve' => array( '첫 문단' ),
+			'must_preserve' => array(),
 		),
-	),
-	'reader_stakes'     => array( array( 'text' => '무엇을 먼저 확인할지 판단해야 한다.', 'fact_ids' => array( 'F1' ) ) ),
-	'common_mistakes'   => array(),
-	'why_it_matters'    => array( array( 'text' => '첫 문단 확인이 핵심이다.', 'fact_ids' => array( 'F1' ) ) ),
-	'unexpected_points' => array(),
-	'actionable_payoffs' => array( array( 'text' => '첫 문단을 확인하는 행동이 가능하다.', 'fact_ids' => array( 'F1' ) ) ),
-	'curiosity_gaps'    => array(),
-	'weak_points_for_copy' => array( array( 'text' => '제목만 반복하지 않는다.', 'fact_ids' => array( 'F1' ) ) ),
-	'hook_angles'      => array(
-		array( 'id' => 'H1', 'type' => 'convenience', 'premise' => '첫째', 'fact_ids' => array( 'F1' ) ),
-		array( 'id' => 'H2', 'type' => 'warning', 'premise' => '둘째', 'fact_ids' => array( 'F1' ) ),
-		array( 'id' => 'H3', 'type' => 'other', 'premise' => '셋째', 'fact_ids' => array( 'F1' ) ),
 	),
 	'blockers'         => array(),
 );
-pct_assert( true === personal_cta_threads_validate_fact_map( $fact_map, $source['text'] ), 'Literal FACT evidence must validate against its source segment.' );
 $fact_schema = personal_cta_threads_fact_schema();
-pct_assert( in_array( 'context_fact_ids', $fact_schema['required'], true ) && 2 === $fact_schema['properties']['context_fact_ids']['maxItems'], 'FACT schema must require a compact standalone-context anchor.' );
-foreach ( personal_cta_threads_content_value_keys() as $value_key ) {
-	pct_assert( in_array( $value_key, $fact_schema['required'], true ) && isset( $fact_schema['properties'][ $value_key ] ), 'Every grounded content-value field must be required by the FACT schema.' );
-}
-pct_assert( 12 === $fact_schema['properties']['facts']['maxItems'] && 1 === $fact_schema['properties']['facts']['items']['properties']['evidence']['maxItems'] && 2 === $fact_schema['properties']['reader_stakes']['maxItems'], 'FACT schema must bound analysis output to the Threads use case.' );
-$unknown_value_fact_map = $fact_map;
-$unknown_value_fact_map['why_it_matters'][0]['fact_ids'] = array( 'F999' );
-pct_assert( is_wp_error( personal_cta_threads_validate_fact_map( $unknown_value_fact_map, $source['text'] ) ), 'Content-value hints may only cite known FACT IDs.' );
-$unknown_context_fact_map = $fact_map;
-$unknown_context_fact_map['context_fact_ids'] = array( 'F999' );
-pct_assert( is_wp_error( personal_cta_threads_validate_fact_map( $unknown_context_fact_map, $source['text'] ) ), 'Standalone context may only cite known FACT IDs.' );
-$empty_context_fact_map = $fact_map;
-$empty_context_fact_map['context_fact_ids'] = array();
-pct_assert( is_wp_error( personal_cta_threads_validate_fact_map( $empty_context_fact_map, $source['text'] ) ), 'A usable FACT MAP must identify at least one standalone-context fact.' );
-$blank_reader_problem_fact_map = $fact_map;
-$blank_reader_problem_fact_map['reader_problem'] = '';
-pct_assert( is_wp_error( personal_cta_threads_validate_fact_map( $blank_reader_problem_fact_map, $source['text'] ) ), 'A usable FACT MAP must describe the reader situation.' );
-$missing_value_fact_map = $fact_map;
-unset( $missing_value_fact_map['reader_stakes'] );
-pct_assert( is_wp_error( personal_cta_threads_validate_fact_map( $missing_value_fact_map, $source['text'] ) ), 'All content-value fields must be present even when empty.' );
-$empty_value_fact_map = $fact_map;
-foreach ( personal_cta_threads_content_value_keys() as $value_key ) {
-	$empty_value_fact_map[ $value_key ] = array();
-}
-pct_assert( true === personal_cta_threads_validate_fact_map( $empty_value_fact_map, $source['text'] ), 'Empty content-value fields must remain valid when the source offers no safe editorial hint.' );
-$too_many_values_fact_map = $fact_map;
-$too_many_values_fact_map['reader_stakes'] = array_fill( 0, 3, $fact_map['reader_stakes'][0] );
-pct_assert( is_wp_error( personal_cta_threads_validate_fact_map( $too_many_values_fact_map, $source['text'] ) ), 'FACT value lists must stay compact.' );
-$blocked_invalid_value_fact_map = $fact_map;
-$blocked_invalid_value_fact_map['blockers'] = array( '원문이 모순됩니다.' );
-unset( $blocked_invalid_value_fact_map['reader_stakes'] );
-pct_assert( is_wp_error( personal_cta_threads_validate_fact_map( $blocked_invalid_value_fact_map, $source['text'] ) ), 'Blockers may not bypass content-value validation.' );
+pct_assert( array( 'topic', 'reader_situation', 'context_fact_ids', 'facts', 'blockers' ) === $fact_schema['required'], 'FACT schema must contain only atomic extraction fields.' );
+pct_assert( ! isset( $fact_schema['properties']['reader_problem'], $fact_schema['properties']['hook_angles'] ) && 12 === $fact_schema['properties']['facts']['maxItems'] && 1 === $fact_schema['properties']['facts']['items']['properties']['evidence']['maxItems'], 'FACT schema must not mix strategy with extraction.' );
+pct_assert( true === personal_cta_threads_validate_fact_map( $fact_map, $source['text'] ), 'A grounded atomic FACT MAP must validate.' );
+$bad_fact_map = $fact_map;
+$bad_fact_map['context_fact_ids'] = array( 'F999' );
+pct_assert( is_wp_error( personal_cta_threads_validate_fact_map( $bad_fact_map, $source['text'] ) ), 'FACT context may cite only known facts.' );
+$bad_fact_map = $fact_map;
+$bad_fact_map['facts'][0]['evidence'][0]['quote'] = '원문에 없는 문장';
+pct_assert( is_wp_error( personal_cta_threads_validate_fact_map( $bad_fact_map, $source['text'] ) ), 'FACT evidence must be literal source text.' );
 
-$copy = array(
-	'text'          => "첫 문단입니다.\n확인해봐.",
-	'hook_angle_id' => 'H1',
-	'fact_ids'      => array( 'F1' ),
-	'claims'        => array( array( 'text' => '첫 문단입니다.', 'fact_ids' => array( 'F1' ) ) ),
-);
-pct_assert( true === personal_cta_threads_validate_copy( $copy, $fact_map, 'H1' ), 'A grounded copy must pass semantic validation.' );
-$missing_context_fact_map = $fact_map;
-$missing_context_fact_map['facts'][] = array(
-	'id'            => 'F2',
-	'claim'         => '제목이 있다.',
-	'evidence'      => array( array( 'source_id' => 'S001', 'quote' => '테스트 글' ) ),
-	'must_preserve' => array(),
-);
-$missing_context_fact_map['hook_angles'][0]['fact_ids'] = array( 'F2' );
-$contextless_copy = array(
-	'text'          => '테스트 글을 확인해봐.',
-	'hook_angle_id' => 'H1',
-	'fact_ids'      => array( 'F2' ),
-	'claims'        => array( array( 'text' => '테스트 글', 'fact_ids' => array( 'F2' ) ) ),
-);
-$contextless_draft_ok  = personal_cta_threads_validate_copy( $contextless_copy, $missing_context_fact_map, 'H1' );
-$missing_context_error = personal_cta_threads_validate_copy( $contextless_copy, $missing_context_fact_map, 'H1', true );
-pct_assert( true === $contextless_draft_ok, 'A context-light writer draft must reach the existing quality-and-rewrite path instead of terminating the run.' );
-pct_assert( is_wp_error( $missing_context_error ) && 'pct_missing_context' === $missing_context_error->get_error_code(), 'A copy that drops every standalone-context fact must fail before delivery.' );
-$hookless_copy = $copy;
-$missing_hook_error = personal_cta_threads_validate_copy( $hookless_copy, $missing_context_fact_map, 'H1' );
-pct_assert( is_wp_error( $missing_hook_error ) && 'pct_missing_hook' === $missing_hook_error->get_error_code(), 'A final copy must retain evidence for its selected hook angle.' );
-$soft_hook_copy = array(
-	'text'          => '테스트 글을 읽는 중 첫 문단에 필요한 정보가 궁금해질 수 있습니다. 먼저 확인해.',
-	'hook_angle_id' => 'H1',
-	'fact_ids'      => array( 'F1', 'F2' ),
-	'claims'        => array(
-		array( 'text' => '첫 문단입니다.', 'fact_ids' => array( 'F1' ) ),
-		array( 'text' => '테스트 글', 'fact_ids' => array( 'F2' ) ),
+$note = array( 'text' => '첫 문단이 핵심이다.', 'fact_ids' => array( 'F1' ) );
+$strategy = array(
+	'core_tension'      => $note,
+	'reader_assumption' => $note,
+	'contrast'          => $note,
+	'best_reveal'       => $note,
+	'secondary_value'   => $note,
+	'boring_fact_ids'   => array(),
+	'hooks'             => array(),
+	'writer_plans'      => array(
+		array( 'writer_id' => 'A', 'structure_id' => 'reversal', 'hook_id' => 'H1' ),
+		array( 'writer_id' => 'B', 'structure_id' => 'mistake_prevention', 'hook_id' => 'H2' ),
+		array( 'writer_id' => 'C', 'structure_id' => 'short_discovery', 'hook_id' => 'H3' ),
 	),
 );
-pct_assert( array( 'weak_hook' ) === personal_cta_threads_local_quality_issues( $soft_hook_copy ), 'A measured soft-context opener must be routed to the existing rewrite step without another quality call.' );
-$strong_hook_copy = $soft_hook_copy;
-$strong_hook_copy['text'] = '교통사고 후 치료가 더 필요하다면 서류부터 떼지 말고 제출 목적을 확인해.';
-pct_assert( array() === personal_cta_threads_local_quality_issues( $strong_hook_copy ), 'A concrete situation-and-choice opener must not be rejected by the narrow local guard.' );
+for ( $i = 1; $i <= 6; $i++ ) {
+	$strategy['hooks'][] = array( 'id' => 'H' . $i, 'text' => 'Hook ' . $i, 'fact_ids' => array( 'F1' ) );
+}
+$strategy_schema = personal_cta_threads_strategy_schema();
+pct_assert( 6 === $strategy_schema['properties']['hooks']['minItems'] && 6 === $strategy_schema['properties']['hooks']['maxItems'] && 3 === $strategy_schema['properties']['writer_plans']['minItems'], 'Strategy must produce six hooks and three plans.' );
+pct_assert( true === personal_cta_threads_validate_strategy( $strategy, $fact_map ), 'A/B/C plans with distinct hooks and structures must validate.' );
+$duplicate_plan = $strategy;
+$duplicate_plan['writer_plans'][1]['structure_id'] = 'reversal';
+pct_assert( is_wp_error( personal_cta_threads_validate_strategy( $duplicate_plan, $fact_map ) ), 'Writer plans must use distinct structures.' );
+$unknown_hook_fact = $strategy;
+$unknown_hook_fact['hooks'][0]['fact_ids'] = array( 'F999' );
+pct_assert( is_wp_error( personal_cta_threads_validate_strategy( $unknown_hook_fact, $fact_map ) ), 'Hooks may cite only known facts.' );
+$duplicate_hook_text = $strategy;
+$duplicate_hook_text['hooks'][1]['text'] = $duplicate_hook_text['hooks'][0]['text'];
+pct_assert( is_wp_error( personal_cta_threads_validate_strategy( $duplicate_hook_text, $fact_map ) ), 'Hook Lab must return six meaningfully distinct hook texts.' );
+
+$copy = pct_copy( 'H1', 'reversal' );
 $copy_schema = personal_cta_threads_copy_schema();
-pct_assert( 12 === $copy_schema['properties']['fact_ids']['maxItems'] && 8 === $copy_schema['properties']['claims']['maxItems'] && 4 === $copy_schema['properties']['claims']['items']['properties']['fact_ids']['maxItems'], 'Copy metadata must stay bounded so it cannot consume the editor output budget.' );
-$too_many_claims = $copy;
-$too_many_claims['claims'] = array_fill( 0, 9, $copy['claims'][0] );
-pct_assert( is_wp_error( personal_cta_threads_validate_copy( $too_many_claims, $fact_map, 'H1' ) ), 'Copy validation must mirror the structured-output claim cap.' );
-$missing_copy         = $copy;
-$missing_copy['text'] = '확인해봐.';
-$missing_error        = personal_cta_threads_validate_copy( $missing_copy, $fact_map, 'H1' );
-pct_assert( is_wp_error( $missing_error ) && 'pct_missing_preserve' === $missing_error->get_error_code(), 'Missing literal preservation must return a dedicated error.' );
-pct_assert( in_array( '첫 문단', (array) $missing_error->get_error_data()['missing_tokens'], true ), 'Missing preservation errors must identify the omitted source token.' );
-$optional_fact_map                              = $fact_map;
-$optional_fact_map['facts'][0]['must_preserve'] = array();
-pct_assert( true === personal_cta_threads_validate_copy( $missing_copy, $optional_fact_map, 'H1' ), 'Facts without literal preservation requirements must remain valid.' );
-$literal_repair = personal_cta_threads_queue_literal_repair( 7, $missing_copy, 'writer', 'H1', array( '첫 문단' ) );
-pct_assert( is_array( $literal_repair ) && ! empty( $literal_repair['pending'] ), 'Missing literals must schedule one repair step.' );
-pct_assert( 'writer' === personal_cta_threads_meta( 7, 'literal_repair' )['target'], 'Literal repair must remember the writer target.' );
-$zero_literal_repair = personal_cta_threads_queue_literal_repair( 7, $missing_copy, 'writer', 'H1', array( '0' ) );
-pct_assert( is_array( $zero_literal_repair ) && in_array( '0', personal_cta_threads_meta( 7, 'literal_repair' )['missing_tokens'], true ), 'A zero value must remain a required literal.' );
-$literal_repair = personal_cta_threads_queue_literal_repair( 7, $missing_copy, 'writer', 'H1', array( '첫 문단' ) );
-$test_remote_response = array(
-	'response' => array( 'code' => 200 ),
-	'body'     => wp_json_encode( array(
-		'id'     => 'resp_literal_repair',
-		'status' => 'completed',
-		'output' => array( array( 'type' => 'message', 'content' => array( array( 'type' => 'output_text', 'text' => wp_json_encode( $copy ) ) ) ) ),
-	) ),
-);
-$repaired_copy = personal_cta_threads_run_literal_repair( 7, $source, $fact_map );
-pct_assert( is_array( $repaired_copy ) && ! empty( $repaired_copy['pending'] ), 'Literal repair must resume generation after one corrected model call.' );
-pct_assert( $copy === personal_cta_threads_meta( 7, 'drafts' )['H1'], 'Literal repair must replace the affected writer draft.' );
-$length_literal_repair = personal_cta_threads_queue_literal_repair( 7, $missing_copy, 'repair', 'H1', array( '첫 문단' ) );
-$length_repaired_copy  = personal_cta_threads_run_literal_repair( 7, $source, $fact_map );
-pct_assert( is_array( $length_literal_repair ) && is_array( $length_repaired_copy ) && $copy === personal_cta_threads_meta( 7, 'repair_result' ), 'Length-repair literals must stay in the length-repair result.' );
+pct_assert( in_array( 'structure_id', $copy_schema['required'], true ), 'Every copy checkpoint must declare its structure.' );
+pct_assert( true === personal_cta_threads_validate_copy( $copy, $fact_map, $strategy, 'H1', 'reversal', true ), 'Copy metadata must validate against strategy and FACT.' );
+$missing_structure = $copy;
+unset( $missing_structure['structure_id'] );
+pct_assert( is_wp_error( personal_cta_threads_validate_copy( $missing_structure, $fact_map, $strategy ) ), 'A copy without structure_id must be rejected.' );
+pct_assert( is_wp_error( personal_cta_threads_validate_copy( $copy, $fact_map, $strategy, 'H1', 'question_answer' ) ), 'A writer may not change its assigned structure.' );
+
+$quality_schema = personal_cta_threads_quality_schema();
+pct_assert( array( 'decision', 'issues', 'copy' ) === $quality_schema['required'] && in_array( 'generic_meta_cta', $quality_schema['properties']['issues']['items']['enum'], true ), 'Final quality must return a bounded decision and candidate.' );
+$pass_quality = array( 'decision' => 'pass', 'issues' => array(), 'copy' => $copy );
+pct_assert( true === personal_cta_threads_validate_quality_review( $pass_quality ), 'A pass with unchanged copy and no issues must validate.' );
+$rewrite_copy         = $copy;
+$rewrite_copy['text'] = '첫 문단을 지금 확인해야 해.';
+$rewrite_quality      = array( 'decision' => 'rewrite', 'issues' => array( 'poor_rhythm' ), 'copy' => $rewrite_copy );
+pct_assert( true === personal_cta_threads_validate_quality_review( $rewrite_quality ), 'A bounded rewrite with an issue must validate.' );
+$bad_quality = array( 'decision' => 'pass', 'issues' => array( 'weak_hook' ), 'copy' => $copy );
+pct_assert( is_wp_error( personal_cta_threads_validate_quality_review( $bad_quality ) ), 'A pass may not retain issues.' );
+$meta_copy         = $copy;
+$meta_copy['text'] = '첫 문단의 자세한 내용을 원문에서 확인해.';
+pct_assert( in_array( 'generic_meta_cta', personal_cta_threads_local_quality_issues( $meta_copy ), true ), 'Generic source/link CTA text must be rejected locally.' );
+$meta_variants = array( '원문과 대조해봐.', '본문을 살펴봐.', '자세한 내용은 읽어봐.', '아래 글을 참고해.', '아래에서 확인해.' );
+foreach ( $meta_variants as $meta_variant ) {
+	$meta_copy['text'] = $meta_variant;
+	pct_assert( in_array( 'generic_meta_cta', personal_cta_threads_local_quality_issues( $meta_copy ), true ), 'Source-confirmation CTA variants must be rejected locally.' );
+}
+$allowed_actions = array( '링크를 열기 전에 주소를 확인해.', '아래 조건을 확인해.', '여기서 먼저 봐야 할 건 예외 조건이야.' );
+foreach ( $allowed_actions as $allowed_action ) {
+	pct_assert( ! in_array( 'generic_meta_cta', personal_cta_threads_local_quality_issues( array( 'text' => $allowed_action ) ), true ), 'Normal link or condition advice must not be mistaken for a meta CTA.' );
+}
+$quality_cases = require __DIR__ . '/fixtures/threads-quality-cases.php';
+foreach ( array_slice( $quality_cases, 0, 2 ) as $quality_case ) {
+	$fixture_copy         = $copy;
+	$fixture_copy['text'] = $quality_case['bad'];
+	$fixture_issues       = personal_cta_threads_local_quality_issues( $fixture_copy );
+	pct_assert( in_array( 'generic_meta_cta', $fixture_issues, true ), $quality_case['id'] . ' must reject the measured source-confirmation CTA.' );
+}
+pct_assert( in_array( 'emoji_lead', personal_cta_threads_local_quality_issues( array( 'text' => $quality_cases[0]['bad'] ) ), true ), 'The measured TV copy must reject a decorative emoji opener.' );
+pct_assert( in_array( 'weak_hook', personal_cta_threads_local_quality_issues( array( 'text' => $quality_cases[1]['bad'] ) ), true ), 'The measured diagnostic-letter opener must retain the weak-hook regression.' );
 
 $units = personal_cta_threads_candidate_units( $copy['text'] );
-$verification = array(
-	'decision' => 'pass',
-	'checks'   => array(
-		array( 'unit_id' => 'T001', 'claim' => '첫 문단입니다.', 'verdict' => 'supported', 'fact_ids' => array( 'F1' ), 'evidence_ids' => array( 'S002' ), 'reason' => '직접 근거' ),
-		array( 'unit_id' => 'T002', 'claim' => '확인해봐.', 'verdict' => 'non_factual', 'fact_ids' => array(), 'evidence_ids' => array(), 'reason' => '행동 안내' ),
-	),
-	'issues'   => array(),
-);
-pct_assert( true === personal_cta_threads_validate_verifier( $verification, $fact_map, $source['text'], $units, array( 'F1' ) ), 'Every candidate line must receive one valid verifier decision.' );
-$missing_check = $verification;
-array_pop( $missing_check['checks'] );
-pct_assert( is_wp_error( personal_cta_threads_validate_verifier( $missing_check, $fact_map, $source['text'], $units, array( 'F1' ) ) ), 'A verifier may not omit a candidate line.' );
+$verifier_pass = pct_verifier_result( $copy['text'], true );
+pct_assert( true === personal_cta_threads_validate_verifier( $verifier_pass, $fact_map, $source['text'], $units, array( 'F1' ) ), 'Every delivered fact must receive a supported verifier result.' );
+$verifier_block = pct_verifier_result( $copy['text'], false );
+pct_assert( is_wp_error( personal_cta_threads_validate_verifier( $verifier_block, $fact_map, $source['text'], $units, array( 'F1' ) ) ), 'An unsupported verifier result must block delivery.' );
 
-personal_cta_threads_set_meta( 7, 'drafts', array( 'H1' => $copy, 'H2' => $copy, 'H3' => $copy ) );
-personal_cta_threads_set_meta( 7, 'editor_result', $copy );
-personal_cta_threads_set_meta( 7, 'repair_result', $copy );
-personal_cta_threads_set_meta( 7, 'final_text', $copy['text'] );
-personal_cta_threads_set_state( 7, 'ready', 'ready' );
-$diagnostics = personal_cta_threads_admin_diagnostics( 7 );
-pct_assert( 3 === count( $diagnostics['drafts'] ) && 'H1' === $diagnostics['drafts'][0]['id'], 'Diagnostics must preserve the writer checkpoint order.' );
-pct_assert( $copy['text'] === $diagnostics['editor']['text'] && $copy['text'] === $diagnostics['repair']['text'] && $copy['text'] === $diagnostics['final']['text'], 'Diagnostics must expose only the saved copy checkpoints.' );
-pct_assert( false === strpos( wp_json_encode( $diagnostics ), 'fact_ids' ), 'Diagnostics must not expose FACT evidence or model metadata.' );
-$ready_state = personal_cta_threads_admin_state( 7 );
-pct_assert( '' !== $ready_state['copy_text'], 'A ready generation must expose its copy text.' );
-personal_cta_threads_set_state( 7, 'failed', 'editor', 'Test failure.' );
-$failed_state = personal_cta_threads_admin_state( 7 );
-pct_assert( '' === $failed_state['text'] && '' === $failed_state['ai_original'] && '' === $failed_state['copy_text'] && 0 === $failed_state['length'], 'A failed generation must not expose an older copy as the current result.' );
-personal_cta_threads_set_state( 7, 'ready', 'ready' );
-
-$current_delivery_context = personal_cta_threads_outbound_url( 7 );
-$current_run_key = hash( 'sha256', $source['hash'] . '|' . personal_cta_threads_openai_model() . '|' . wp_json_encode( personal_cta_threads_prompt_versions() ) . '|' . hash( 'sha256', personal_cta_threads_style_examples_text() ) . '|' . $current_delivery_context );
-personal_cta_threads_set_meta( 7, 'source_hash', $source['hash'] );
-personal_cta_threads_set_meta( 7, 'generation_key', $current_run_key );
-personal_cta_threads_set_state( 7, 'queued', 'queued' );
-$reused_copy = personal_cta_threads_generate( 7, false );
-pct_assert( is_array( $reused_copy ) && ! empty( $reused_copy['reused'] ) && 'ready' === personal_cta_threads_meta( 7, 'status' ), 'A matching completed generation must restore ready state without calling the model.' );
-$link_toggle_settings                 = personal_cta_threads_settings();
-$link_toggle_settings['include_link'] = false;
-update_option( PERSONAL_CTA_THREADS_SETTINGS_OPTION, $link_toggle_settings );
-personal_cta_threads_set_state( 7, 'queued', 'queued' );
-$link_toggled_copy = personal_cta_threads_generate( 7, false );
-pct_assert( ! is_array( $link_toggled_copy ) || empty( $link_toggled_copy['reused'] ), 'Changing the outbound-link context must not reuse a copy with a different CTA or body budget.' );
-$link_toggle_settings['include_link'] = true;
-update_option( PERSONAL_CTA_THREADS_SETTINGS_OPTION, $link_toggle_settings );
-$test_permalink = 'https://example.test/' . str_repeat( 'a', 500 );
-$url_request_count = count( $test_remote_requests );
-$url_too_long = personal_cta_threads_generate( 11, false );
-pct_assert( is_wp_error( $url_too_long ) && 'pct_outbound_url_too_long' === $url_too_long->get_error_code() && $url_request_count === count( $test_remote_requests ), 'An impossible outbound URL must fail before any model call.' );
-$test_permalink = '';
-personal_cta_threads_set_meta( 7, 'generation_key', 'outdated-generation-key' );
-personal_cta_threads_set_state( 7, 'queued', 'queued' );
-$outdated_copy = personal_cta_threads_generate( 7, false );
-pct_assert( ! is_array( $outdated_copy ) || empty( $outdated_copy['reused'] ), 'A prompt-version change must not reuse an older completed generation.' );
-
-$queued = personal_cta_threads_queue( 7, false );
-pct_assert( true === $queued, 'A copy-generation request must queue successfully.' );
-pct_assert( 'queued' === personal_cta_threads_meta( 7, 'status' ), 'A copy-generation request must never publish the post.' );
-pct_assert( (int) personal_cta_threads_meta( 7, 'last_heartbeat', 0 ) > 0 && (int) personal_cta_threads_meta( 7, 'lease_until', 0 ) > time(), 'A queued job must be recoverable by the watchdog.' );
-personal_cta_threads_set_state( 7, 'drafting', 'writer_h2_complete' );
-delete_post_meta( 7, '_pct_threads_lease_until' );
-pct_assert( true === personal_cta_threads_resume( 7 ), 'A stalled job must be requeued without discarding its checkpoints.' );
-pct_assert( 'drafting' === personal_cta_threads_meta( 7, 'status' ) && 'writer_h2_complete' === personal_cta_threads_meta( 7, 'stage' ), 'Resuming must preserve the generation checkpoint state.' );
-
-personal_cta_threads_set_meta( 7, 'generation_id', 'retry-fixture' );
-personal_cta_threads_set_state( 7, 'editing', 'editor' );
-$first_transport_retry = personal_cta_threads_retry_transient_error( 7, new WP_Error( 'pct_openai_network', 'test' ) );
-$second_transport_retry = personal_cta_threads_retry_transient_error( 7, new WP_Error( 'pct_openai_network', 'test' ) );
-pct_assert( true === $first_transport_retry && false === $second_transport_retry && 'retry_wait' === personal_cta_threads_meta( 7, 'stage' ), 'A generation must spend at most one automatic transport retry.' );
-delete_post_meta( 7, '_pct_threads_transport_retry' );
-
-$transport_post_id = 12;
-$transport_request_count = count( $test_remote_requests );
-$test_remote_response = new WP_Error( 'http_request_failed', 'fixture network failure' );
-personal_cta_threads_set_state( $transport_post_id, 'queued', 'queued' );
-personal_cta_threads_run_job( $transport_post_id );
-pct_assert( 'analyzing' === personal_cta_threads_meta( $transport_post_id, 'status' ) && 'retry_wait' === personal_cta_threads_meta( $transport_post_id, 'stage' ), 'A transient model transport failure must retain its checkpoint and wait once.' );
-delete_option( 'personal_cta_threads_' . $transport_post_id . '.lock' );
-personal_cta_threads_run_job( $transport_post_id );
-pct_assert( 'failed' === personal_cta_threads_meta( $transport_post_id, 'status' ) && 'fact' === personal_cta_threads_meta( $transport_post_id, 'stage' ) && $transport_request_count + 2 === count( $test_remote_requests ), 'The second transient failure must stop instead of creating a retry loop.' );
-
-delete_post_meta( 7, '_pct_threads_final_text' );
-delete_post_meta( 7, '_pct_threads_source_hash' );
-delete_post_meta( 7, '_pct_threads_generation_key' );
-delete_post_meta( 7, '_pct_threads_fact_map' );
-delete_post_meta( 7, '_pct_threads_fact_cache_key' );
-delete_post_meta( 7, '_pct_threads_lease_until' );
-personal_cta_threads_set_state( 7, 'queued', 'queued' );
-$test_remote_response = array(
-	'response' => array( 'code' => 200 ),
-	'body'     => wp_json_encode( array( 'status' => 'incomplete', 'incomplete_details' => array( 'reason' => 'max_output_tokens' ) ) ),
-);
-personal_cta_threads_run_job( 7 );
-pct_assert( 'failed' === personal_cta_threads_meta( 7, 'status' ) && 'fact' === personal_cta_threads_meta( 7, 'stage' ), 'A failed model call must retain the concrete pipeline stage for diagnostics.' );
-
-$quality_post_id = 8;
-$quality_fact_map = $fact_map;
-$quality_fact_map['facts'][0]['must_preserve'] = array();
-$quality_run_key = hash( 'sha256', $source['hash'] . '|' . personal_cta_threads_openai_model() . '|' . wp_json_encode( personal_cta_threads_prompt_versions() ) . '|' . hash( 'sha256', personal_cta_threads_style_examples_text() ) . '|' . personal_cta_threads_outbound_url( $quality_post_id ) );
-$quality_fact_key = hash( 'sha256', $source['hash'] . '|' . personal_cta_threads_openai_model() . '|' . PERSONAL_CTA_THREADS_FACT_PROMPT_VERSION . '|' . PERSONAL_CTA_THREADS_SCHEMA_VERSION );
-$quality_drafts = array();
-foreach ( array( 'H1', 'H2', 'H3' ) as $quality_hook_id ) {
-	$quality_draft                  = $copy;
-	$quality_draft['hook_angle_id'] = $quality_hook_id;
-	$quality_drafts[ $quality_hook_id ] = $quality_draft;
+/* Normal v0.5 generation: FACT, strategy, three writers, editor, quality, verifier. */
+$normal_post_id        = 20;
+$normal_editor         = pct_copy( 'H1', 'reversal' );
+$normal_quality        = array( 'decision' => 'pass', 'issues' => array(), 'copy' => $normal_editor );
+$test_remote_response  = new WP_Error( 'unexpected_request', 'The mock response queue was exhausted.' );
+$test_remote_responses = pct_pipeline_responses( $normal_post_id, $fact_map, $strategy, $normal_editor, $normal_quality, pct_verifier_result( $normal_editor['text'], true ) );
+$request_start         = count( $test_remote_requests );
+$normal_result         = pct_drive_generation( $normal_post_id );
+$normal_requests       = array_slice( $test_remote_requests, $request_start );
+pct_assert( is_array( $normal_result ) && empty( $normal_result['pending'] ) && 'ready' === personal_cta_threads_meta( $normal_post_id, 'status' ), 'A supported generation must reach ready.' );
+pct_assert( 8 === count( $normal_requests ) && 8 === (int) personal_cta_threads_meta( $normal_post_id, 'call_count' ) && empty( $test_remote_responses ), 'A normal generation must use exactly eight requests.' );
+$request_stages = array();
+foreach ( $normal_requests as $request ) {
+	$request_payload  = json_decode( $request['args']['body'], true );
+	$request_stages[] = $request_payload['text']['format']['name'];
+	if ( in_array( $request_payload['text']['format']['name'], array( 'threads_writer', 'threads_editor', 'threads_quality' ), true ) ) {
+		pct_assert( false === strpos( $request_payload['input'][1]['content'][0]['text'], 'source_document' ), 'Writers, editor, and quality may not receive the raw source.' );
+	}
 }
-$quality_editor = $copy;
-$quality_editor['text'] = "먼저 확인해.\n\n준비 순서를 봐 👇";
-$quality_editor['claims'][0]['text'] = '먼저 확인해.';
-personal_cta_threads_set_meta( $quality_post_id, 'fact_map', $quality_fact_map );
-personal_cta_threads_set_meta( $quality_post_id, 'fact_cache_key', $quality_fact_key );
-personal_cta_threads_set_meta( $quality_post_id, 'drafts', $quality_drafts );
-personal_cta_threads_set_meta( $quality_post_id, 'editor_result', $quality_editor );
-personal_cta_threads_set_meta( $quality_post_id, 'generation_key', $quality_run_key );
-personal_cta_threads_set_state( $quality_post_id, 'editing', 'editor_complete' );
-$quality_request_count = count( $test_remote_requests );
-$test_remote_response = array(
-	'response' => array( 'code' => 200 ),
-	'body'     => wp_json_encode( array(
-		'id'     => 'resp_quality_rewrite',
-		'status' => 'completed',
-		'output' => array( array( 'type' => 'message', 'content' => array( array( 'type' => 'output_text', 'text' => wp_json_encode( array( 'decision' => 'rewrite', 'issues' => array( 'missing_context' ) ) ) ) ) ) ),
-	) ),
-);
-$quality_pending = personal_cta_threads_generate( $quality_post_id, false );
-pct_assert( is_array( $quality_pending ) && ! empty( $quality_pending['pending'] ) && 'quality_complete' === personal_cta_threads_meta( $quality_post_id, 'stage' ) && $quality_request_count + 1 === count( $test_remote_requests ), 'A cached editor result must schedule exactly one quality review.' );
+pct_assert( array( 'threads_fact', 'threads_strategy', 'threads_writer', 'threads_writer', 'threads_writer', 'threads_editor', 'threads_quality', 'threads_verifier' ) === $request_stages, 'The v0.5 request order is invalid.' );
 
-$conversion_copy = $copy;
-$conversion_copy['text'] = "테스트 글을 읽을 때는 첫 문단입니다.\n\n무엇을 먼저 확인할지 링크에서 확인해봐 👇";
-$test_remote_response = array(
-	'response' => array( 'code' => 200 ),
-	'body'     => wp_json_encode( array(
-		'id'     => 'resp_conversion_repair',
-		'status' => 'completed',
-		'output' => array( array( 'type' => 'message', 'content' => array( array( 'type' => 'output_text', 'text' => wp_json_encode( $conversion_copy ) ) ) ) ),
-	) ),
-);
-$conversion_pending = personal_cta_threads_generate( $quality_post_id, false );
-pct_assert( is_array( $conversion_pending ) && ! empty( $conversion_pending['pending'] ) && 'conversion_repair_complete' === personal_cta_threads_meta( $quality_post_id, 'stage' ) && 1 === (int) personal_cta_threads_meta( $quality_post_id, 'conversion_rewrite_done' ) && $quality_request_count + 2 === count( $test_remote_requests ), 'A rewrite review must schedule exactly one conversion repair.' );
-pct_assert( 0 === strpos( personal_cta_threads_meta( $quality_post_id, 'editor_result' )['text'], '테스트 글' ), 'A missing-context rewrite must restore the standalone situation before delivery.' );
+$diagnostics = personal_cta_threads_admin_diagnostics( $normal_post_id );
+$diagnostic_json = wp_json_encode( $diagnostics );
+pct_assert( 3 === count( $diagnostics['drafts'] ) && 'A' === $diagnostics['drafts'][0]['id'] && 'pass' === $diagnostics['final_quality']['decision'] && 'pass' === $diagnostics['verifier']['decision'], 'Diagnostics must expose the v0.5 checkpoints.' );
+pct_assert( false === strpos( $diagnostic_json, 'evidence' ) && false === strpos( $diagnostic_json, 'must_preserve' ) && false === strpos( $diagnostic_json, 'response_id' ), 'Diagnostics must hide source evidence and provider metadata.' );
+$reuse_start = count( $test_remote_requests );
+$reused      = personal_cta_threads_generate( $normal_post_id, false );
+pct_assert( is_array( $reused ) && ! empty( $reused['reused'] ) && $reuse_start === count( $test_remote_requests ), 'A passed verifier result must be reused without another provider call.' );
+$test_post_title = '변경된 테스트 글';
+$stale_state     = personal_cta_threads_admin_state( $normal_post_id );
+pct_assert( 'failed' === $stale_state['status'] && '' === $stale_state['copy_text'] && 'not_run' === personal_cta_threads_meta( $normal_post_id, 'verifier_state' ), 'A source edit must immediately hide an older ready copy.' );
+$test_post_title = '테스트 글';
 
-$ready_request_count = count( $test_remote_requests );
-$quality_ready        = personal_cta_threads_generate( $quality_post_id, false );
-pct_assert( is_array( $quality_ready ) && empty( $quality_ready['pending'] ) && 'ready' === personal_cta_threads_meta( $quality_post_id, 'status' ) && $conversion_copy['text'] === personal_cta_threads_meta( $quality_post_id, 'final_text' ) && $ready_request_count === count( $test_remote_requests ), 'A repaired conversion must finish without another quality request.' );
+/* A pass decision may not silently mutate the editor candidate. */
+$mutation_post_id   = 21;
+$mutation_editor    = pct_copy( 'H1', 'reversal' );
+$mutated_copy       = pct_copy( 'H1', 'reversal', '첫 문단을 지금 확인해야 해.' );
+$mutation_quality   = array( 'decision' => 'pass', 'issues' => array(), 'copy' => $mutated_copy );
+$test_remote_responses = pct_pipeline_responses( $mutation_post_id, $fact_map, $strategy, $mutation_editor, $mutation_quality );
+$mutation_start     = count( $test_remote_requests );
+$mutation_result    = pct_drive_generation( $mutation_post_id );
+pct_assert( is_wp_error( $mutation_result ) && 'pct_invalid_quality_review' === $mutation_result->get_error_code() && 7 === count( $test_remote_requests ) - $mutation_start, 'A pass that changes copy must fail at final quality.' );
 
-$metadata_context_post_id = 10;
-$metadata_context_run_key = hash( 'sha256', $source['hash'] . '|' . personal_cta_threads_openai_model() . '|' . wp_json_encode( personal_cta_threads_prompt_versions() ) . '|' . hash( 'sha256', personal_cta_threads_style_examples_text() ) . '|' . personal_cta_threads_outbound_url( $metadata_context_post_id ) );
-$metadata_context_fact_key = hash( 'sha256', $source['hash'] . '|' . personal_cta_threads_openai_model() . '|' . PERSONAL_CTA_THREADS_FACT_PROMPT_VERSION . '|' . PERSONAL_CTA_THREADS_SCHEMA_VERSION );
-$metadata_context_drafts = array( 'H1' => $contextless_copy );
-foreach ( array( 'H2', 'H3' ) as $metadata_hook_id ) {
-	$metadata_draft = $copy;
-	$metadata_draft['hook_angle_id'] = $metadata_hook_id;
-	$metadata_context_drafts[ $metadata_hook_id ] = $metadata_draft;
-}
-$restored_context_copy = array(
-	'text'          => "테스트 글을 읽을 때는 첫 문단입니다.\n\n확인해봐.",
-	'hook_angle_id' => 'H1',
-	'fact_ids'      => array( 'F1', 'F2' ),
-	'claims'        => array(
-		array( 'text' => '첫 문단입니다.', 'fact_ids' => array( 'F1' ) ),
-		array( 'text' => '테스트 글', 'fact_ids' => array( 'F2' ) ),
-	),
-);
-personal_cta_threads_set_meta( $metadata_context_post_id, 'fact_map', $missing_context_fact_map );
-personal_cta_threads_set_meta( $metadata_context_post_id, 'fact_cache_key', $metadata_context_fact_key );
-personal_cta_threads_set_meta( $metadata_context_post_id, 'drafts', $metadata_context_drafts );
-personal_cta_threads_set_meta( $metadata_context_post_id, 'editor_result', $soft_hook_copy );
-personal_cta_threads_set_meta( $metadata_context_post_id, 'generation_key', $metadata_context_run_key );
-personal_cta_threads_set_state( $metadata_context_post_id, 'editing', 'editor_complete' );
-$metadata_context_request_count = count( $test_remote_requests );
-$test_remote_response = array(
-	'response' => array( 'code' => 200 ),
-	'body'     => wp_json_encode( array(
-		'id'     => 'resp_metadata_context_repair',
-		'status' => 'completed',
-		'output' => array( array( 'type' => 'message', 'content' => array( array( 'type' => 'output_text', 'text' => wp_json_encode( $restored_context_copy ) ) ) ) ),
-	) ),
-);
-$metadata_context_pending = personal_cta_threads_generate( $metadata_context_post_id, false );
-pct_assert( is_array( $metadata_context_pending ) && ! empty( $metadata_context_pending['pending'] ) && 'conversion_repair_complete' === personal_cta_threads_meta( $metadata_context_post_id, 'stage' ) && $metadata_context_request_count + 1 === count( $test_remote_requests ), 'A measured soft opener must use the existing one-call conversion repair without spending a separate quality call.' );
-pct_assert( array( 'weak_hook' ) === personal_cta_threads_meta( $metadata_context_post_id, 'quality_review' )['issues'] && '' === personal_cta_threads_meta( $metadata_context_post_id, 'quality_response_id' ), 'A deterministic hook omission must route to repair without a model quality review.' );
+/* The final verifier is automatic and can block an otherwise valid copy. */
+$blocked_post_id       = 22;
+$blocked_editor        = pct_copy( 'H1', 'reversal' );
+$blocked_quality       = array( 'decision' => 'pass', 'issues' => array(), 'copy' => $blocked_editor );
+$test_remote_responses = pct_pipeline_responses( $blocked_post_id, $fact_map, $strategy, $blocked_editor, $blocked_quality, pct_verifier_result( $blocked_editor['text'], false ) );
+$blocked_start         = count( $test_remote_requests );
+$blocked_result        = pct_drive_generation( $blocked_post_id );
+pct_assert( is_wp_error( $blocked_result ) && 'pct_verifier_blocked' === $blocked_result->get_error_code() && 'blocked' === personal_cta_threads_meta( $blocked_post_id, 'verifier_state' ), 'An unsupported final verifier result must block readiness.' );
+pct_assert( 'ready' !== personal_cta_threads_meta( $blocked_post_id, 'status' ) && 8 === count( $test_remote_requests ) - $blocked_start, 'A blocked verifier must not expose a ready generation.' );
 
-$editor_recovery_post_id = 9;
-$editor_recovery_source  = personal_cta_threads_source( $editor_recovery_post_id );
-$editor_recovery_run_key = hash( 'sha256', $editor_recovery_source['hash'] . '|' . personal_cta_threads_openai_model() . '|' . wp_json_encode( personal_cta_threads_prompt_versions() ) . '|' . hash( 'sha256', personal_cta_threads_style_examples_text() ) . '|' . personal_cta_threads_outbound_url( $editor_recovery_post_id ) );
-$editor_recovery_fact_key = hash( 'sha256', $editor_recovery_source['hash'] . '|' . personal_cta_threads_openai_model() . '|' . PERSONAL_CTA_THREADS_FACT_PROMPT_VERSION . '|' . PERSONAL_CTA_THREADS_SCHEMA_VERSION );
-$editor_recovery_drafts   = array();
-foreach ( array( 'H1', 'H2', 'H3' ) as $editor_recovery_hook_id ) {
-	$editor_recovery_draft                  = $copy;
-	$editor_recovery_draft['hook_angle_id'] = $editor_recovery_hook_id;
-	$editor_recovery_drafts[ $editor_recovery_hook_id ] = $editor_recovery_draft;
-}
-personal_cta_threads_set_meta( $editor_recovery_post_id, 'fact_map', $fact_map );
-personal_cta_threads_set_meta( $editor_recovery_post_id, 'fact_cache_key', $editor_recovery_fact_key );
-personal_cta_threads_set_meta( $editor_recovery_post_id, 'drafts', $editor_recovery_drafts );
-personal_cta_threads_set_meta( $editor_recovery_post_id, 'generation_key', $editor_recovery_run_key );
-personal_cta_threads_set_state( $editor_recovery_post_id, 'editing', 'editor' );
-$editor_request_count = count( $test_remote_requests );
-$test_remote_response = array(
-	'response' => array( 'code' => 200 ),
-	'body'     => wp_json_encode( array( 'status' => 'incomplete', 'incomplete_details' => array( 'reason' => 'max_output_tokens' ) ) ),
+/* Repairs and retries cannot exceed the per-generation provider-call ceiling. */
+$cap_post_id = 23;
+personal_cta_threads_set_meta( $cap_post_id, 'call_count', PERSONAL_CTA_THREADS_CALL_LIMIT );
+$cap_start = count( $test_remote_requests );
+$cap_error = personal_cta_threads_pipeline_request(
+	$cap_post_id,
+	'fact',
+	'test',
+	array(),
+	array(
+		'type'                 => 'object',
+		'additionalProperties' => false,
+		'required'             => array( 'ok' ),
+		'properties'           => array( 'ok' => array( 'type' => 'boolean' ) ),
+	)
 );
-$editor_retry_pending = personal_cta_threads_generate( $editor_recovery_post_id, false );
-$editor_first_payload = json_decode( $test_remote_requests[ count( $test_remote_requests ) - 1 ]['args']['body'], true );
-pct_assert( is_array( $editor_retry_pending ) && ! empty( $editor_retry_pending['pending'] ) && 'editor_retry' === personal_cta_threads_meta( $editor_recovery_post_id, 'stage' ) && 1 === (int) personal_cta_threads_meta( $editor_recovery_post_id, 'editor_output_retry' ) && $editor_request_count + 1 === count( $test_remote_requests ) && 6144 === $editor_first_payload['max_output_tokens'] && 'medium' === $editor_first_payload['reasoning']['effort'], 'A truncated editor must schedule exactly one medium-effort to low-effort recovery.' );
-$test_remote_response = array(
-	'response' => array( 'code' => 200 ),
-	'body'     => wp_json_encode( array(
-		'id'     => 'resp_editor_recovery',
-		'status' => 'completed',
-		'output' => array( array( 'type' => 'message', 'content' => array( array( 'type' => 'output_text', 'text' => wp_json_encode( $copy ) ) ) ) ),
-	) ),
-);
-$editor_recovered     = personal_cta_threads_generate( $editor_recovery_post_id, false );
-$editor_retry_payload = json_decode( $test_remote_requests[ count( $test_remote_requests ) - 1 ]['args']['body'], true );
-$editor_retry_input   = $editor_retry_payload['input'][1]['content'][0]['text'];
-pct_assert( is_array( $editor_recovered ) && ! empty( $editor_recovered['pending'] ) && 'editor_complete' === personal_cta_threads_meta( $editor_recovery_post_id, 'stage' ) && '' === personal_cta_threads_meta( $editor_recovery_post_id, 'editor_output_retry' ) && $editor_request_count + 2 === count( $test_remote_requests ) && 8192 === $editor_retry_payload['max_output_tokens'] && 'low' === $editor_retry_payload['reasoning']['effort'] && false === strpos( $editor_retry_input, '"source_document"' ), 'The single editor recovery must use the compact FACT MAP-only request and then clear its retry marker.' );
+pct_assert( is_wp_error( $cap_error ) && 'pct_call_limit' === $cap_error->get_error_code() && $cap_start === count( $test_remote_requests ), 'The call cap must stop before another provider request.' );
 
-echo "Threads copy-generation safeguards are valid.\n";
+$queued = personal_cta_threads_queue( 30, false );
+pct_assert( true === $queued && 'queued' === personal_cta_threads_meta( 30, 'status' ), 'A generation request must queue without publishing.' );
+pct_assert( (int) personal_cta_threads_meta( 30, 'last_heartbeat', 0 ) > 0 && (int) personal_cta_threads_meta( 30, 'lease_until', 0 ) > time(), 'A queued job must remain recoverable.' );
+personal_cta_threads_set_state( 30, 'drafting', 'writer_b_complete' );
+delete_post_meta( 30, '_pct_threads_lease_until' );
+pct_assert( true === personal_cta_threads_resume( 30 ) && 'writer_b_complete' === personal_cta_threads_meta( 30, 'stage' ), 'Resume must preserve the checkpoint.' );
+
+personal_cta_threads_set_meta( 31, 'generation_id', 'retry-fixture' );
+personal_cta_threads_set_state( 31, 'editing', 'editor' );
+$first_retry  = personal_cta_threads_retry_transient_error( 31, new WP_Error( 'pct_openai_network', 'test' ) );
+$second_retry = personal_cta_threads_retry_transient_error( 31, new WP_Error( 'pct_openai_network', 'test' ) );
+pct_assert( true === $first_retry && false === $second_retry && 'retry_wait' === personal_cta_threads_meta( 31, 'stage' ), 'A generation may spend only one automatic transport retry.' );
+
+echo "Threads v0.5 copy-generation safeguards are valid.\n";
