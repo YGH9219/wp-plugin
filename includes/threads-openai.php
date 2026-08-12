@@ -13,12 +13,19 @@ define( 'PERSONAL_CTA_THREADS_REPAIR_PROMPT_VERSION', '1.0' );
 define( 'PERSONAL_CTA_THREADS_SCHEMA_VERSION', '1.0' );
 
 /**
- * Returns the configured OpenAI API key without persisting it in WordPress.
+ * Returns a configured OpenAI API key, preferring wp-config or the environment.
  *
- * @return string
+ * @return string|WP_Error
  */
 function personal_cta_threads_openai_key() {
-	return personal_cta_threads_config_secret( 'PERSONAL_CTA_OPENAI_API_KEY', 'OPENAI_API_KEY' );
+	$config_key = personal_cta_threads_config_secret( 'PERSONAL_CTA_OPENAI_API_KEY', 'OPENAI_API_KEY' );
+	if ( '' !== $config_key ) {
+		return $config_key;
+	}
+
+	$stored_key = personal_cta_threads_saved_openai_key();
+
+	return $stored_key;
 }
 
 /**
@@ -163,8 +170,11 @@ function personal_cta_threads_openai_parse_response( $body, $http_status = 200 )
  */
 function personal_cta_threads_openai_request( $stage, $developer_prompt, $context, $schema, $max_output_tokens = 4096 ) {
 	$key = personal_cta_threads_openai_key();
+	if ( is_wp_error( $key ) ) {
+		return $key;
+	}
 	if ( '' === $key ) {
-		return new WP_Error( 'pct_openai_not_configured', 'wp-config.php에 PERSONAL_CTA_OPENAI_API_KEY 또는 OPENAI_API_KEY를 설정하세요.' );
+		return new WP_Error( 'pct_openai_not_configured', '설정 → Threads 문구 또는 wp-config.php에서 OpenAI API 키를 설정하세요.' );
 	}
 
 	$stage       = sanitize_key( $stage );

@@ -19,7 +19,9 @@ Threads 기능은 기본적으로 꺼져 있으며, 일반 방문자에게는 �
 
 ## OpenAI API 키 설정
 
-API 키는 플러그인 설정이나 Git 저장소가 아니라 `wp-config.php` 또는 서버 환경변수에 둡니다.
+`설정 → Threads 문구`에서 API 키를 직접 입력해 저장할 수 있습니다. 저장된 키는 다시 표시하지 않으며 WordPress 보안 키로 암호화해 비자동로드 옵션에 보관합니다. `wp-config.php` 또는 서버 환경변수 설정이 있으면 그 값이 우선합니다.
+
+서버 설정으로 관리하려면 다음처럼 둘 수도 있습니다.
 
 ```php
 define( 'PERSONAL_CTA_OPENAI_API_KEY', '...');
@@ -31,7 +33,7 @@ define( 'PERSONAL_CTA_OPENAI_API_KEY', '...');
 
 1. 플러그인을 설치하고 활성화합니다.
 2. WordPress 관리자에서 `설정 → Threads 문구`를 엽니다.
-3. 기능을 켜고, 복사할 원문 링크와 UTM 사용 여부를 저장합니다.
+3. 기능을 켜고 OpenAI API 키, 복사할 원문 링크와 UTM 사용 여부를 저장합니다.
 4. 일반 글을 발행한 뒤 PC에서 해당 글의 Gutenberg 편집 화면을 엽니다.
 5. 오른쪽 `글` 탭의 `Threads 문구` 패널에서 `문구 만들기`를 누릅니다.
 6. 준비된 문구를 `복사`해 Threads에 직접 붙여넣고 업로드합니다.
@@ -67,6 +69,6 @@ docker run --rm --mount $mount -w /app php:7.4-cli sh -lc "find . -path ./dist -
 
 1. `personal-cta-blocks.php`, `blocks/pulse-button/block.json`, `blocks/pulse-button/editor.asset.php` 버전을 같은 값으로 올립니다.
 2. `main`에 커밋·푸시하고 CI를 확인합니다.
-3. 같은 버전의 태그를 푸시합니다. 예: `git tag v0.3.1` 후 `git push origin v0.3.1`.
+3. 같은 버전의 태그를 푸시합니다. 예: `git tag v0.3.2` 후 `git push origin v0.3.2`.
 
 태그가 푸시되면 GitHub Actions가 설치 가능한 `personal-cta-blocks-{version}.zip`을 만들고 GitHub Release에 올립니다. 플러그인 폴더명과 메인 파일명은 기존 자동 업데이트 호환성을 위해 변경하지 않습니다.

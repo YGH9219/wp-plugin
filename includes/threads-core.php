@@ -6,6 +6,8 @@
 defined( 'ABSPATH' ) || exit;
 
 define( 'PERSONAL_CTA_THREADS_SETTINGS_OPTION', 'personal_cta_threads_settings' );
+define( 'PERSONAL_CTA_THREADS_OPENAI_KEY_OPTION', 'personal_cta_threads_openai_key' );
+define( 'PERSONAL_CTA_THREADS_OPENAI_KEY_AAD', 'personal_cta_threads_openai_key|v1' );
 define( 'PERSONAL_CTA_THREADS_JOB_HOOK', 'personal_cta_threads_generate_job' );
 define( 'PERSONAL_CTA_THREADS_WATCHDOG_HOOK', 'personal_cta_threads_watchdog' );
 
@@ -44,9 +46,167 @@ function personal_cta_threads_config_secret( $constant, $environment ) {
 		}
 	}
 
-	$value = getenv( $environment );
+	foreach ( array_unique( array( $constant, $environment ) ) as $name ) {
+		$value = getenv( $name );
+		if ( is_string( $value ) && '' !== trim( $value ) ) {
+			return trim( $value );
+		}
+	}
 
-	return is_string( $value ) ? trim( $value ) : '';
+	return '';
+}
+
+/**
+ * Derives the local encryption key from the WordPress secret salts.
+ *
+ * @return string|WP_Error
+ */
+function personal_cta_threads_openai_storage_key() {
+	if ( ! function_exists( 'wp_salt' ) || ! function_exists( 'openssl_encrypt' ) || ! function_exists( 'openssl_decrypt' ) || ! function_exists( 'openssl_get_cipher_methods' ) ) {
+		return new WP_Error( 'pct_openai_storage_unavailable', '서버에서 API 키를 안전하게 저장할 수 없습니다.' );
+	}
+	$ciphers = openssl_get_cipher_methods();
+	if ( ! is_array( $ciphers ) || ! in_array( 'aes-256-gcm', array_map( 'strtolower', $ciphers ), true ) ) {
+		return new WP_Error( 'pct_openai_storage_unavailable', '서버에서 API 키 암호화를 지원하지 않습니다.' );
+	}
+
+	$salt = wp_salt( 'auth' );
+	if ( ! is_string( $salt ) || '' === $salt ) {
+		return new WP_Error( 'pct_openai_storage_unavailable', 'WordPress 보안 키를 읽을 수 없습니다.' );
+	}
+
+	$key = function_exists( 'hash_hkdf' )
+		? hash_hkdf( 'sha256', $salt, 32, 'personal-cta-threads-openai-key' )
+		: hash( 'sha256', 'personal-cta-threads-openai|' . $salt, true );
+
+	return is_string( $key ) && 32 === strlen( $key )
+		? $key
+		: new WP_Error( 'pct_openai_storage_unavailable', 'API 키 암호화 키를 만들 수 없습니다.' );
+}
+
+/**
+ * Encrypts an API key before it enters the WordPress options table.
+ *
+ * @param string $api_key API key.
+ * @return array<string, string|int>|WP_Error
+ */
+function personal_cta_threads_encrypt_openai_key( $api_key ) {
+	$key = personal_cta_threads_openai_storage_key();
+	if ( is_wp_error( $key ) ) {
+		return $key;
+	}
+
+	try {
+		$iv = random_bytes( 12 );
+	} catch ( Exception $exception ) {
+		return new WP_Error( 'pct_openai_storage_failed', 'API 키 암호화 준비에 실패했습니다.' );
+	}
+
+	$tag        = '';
+	$ciphertext = openssl_encrypt( (string) $api_key, 'aes-256-gcm', $key, OPENSSL_RAW_DATA, $iv, $tag, PERSONAL_CTA_THREADS_OPENAI_KEY_AAD );
+	if ( false === $ciphertext || 16 !== strlen( $tag ) ) {
+		return new WP_Error( 'pct_openai_storage_failed', 'API 키 암호화에 실패했습니다.' );
+	}
+
+	return array(
+		'v'          => 1,
+		'iv'         => base64_encode( $iv ),
+		'tag'        => base64_encode( $tag ),
+		'ciphertext' => base64_encode( $ciphertext ),
+	);
+}
+
+/**
+ * Decrypts a stored API key only for a server-side OpenAI request.
+ *
+ * @param mixed $envelope Stored encrypted key record.
+ * @return string|WP_Error
+ */
+function personal_cta_threads_decrypt_openai_key( $envelope ) {
+	$key = personal_cta_threads_openai_storage_key();
+	if ( is_wp_error( $key ) ) {
+		return $key;
+	}
+	if ( ! is_array( $envelope ) || 1 !== (int) ( $envelope['v'] ?? 0 ) ) {
+		return new WP_Error( 'pct_openai_storage_invalid', '저장된 API 키 형식이 올바르지 않습니다.' );
+	}
+
+	$iv         = isset( $envelope['iv'] ) ? base64_decode( (string) $envelope['iv'], true ) : false;
+	$tag        = isset( $envelope['tag'] ) ? base64_decode( (string) $envelope['tag'], true ) : false;
+	$ciphertext = isset( $envelope['ciphertext'] ) ? base64_decode( (string) $envelope['ciphertext'], true ) : false;
+	if ( false === $iv || false === $tag || false === $ciphertext || 12 !== strlen( $iv ) || 16 !== strlen( $tag ) ) {
+		return new WP_Error( 'pct_openai_storage_invalid', '저장된 API 키 형식이 올바르지 않습니다.' );
+	}
+
+	$api_key = openssl_decrypt( $ciphertext, 'aes-256-gcm', $key, OPENSSL_RAW_DATA, $iv, $tag, PERSONAL_CTA_THREADS_OPENAI_KEY_AAD );
+	if ( false === $api_key || '' === $api_key ) {
+		return new WP_Error( 'pct_openai_storage_invalid', '저장된 API 키를 읽을 수 없습니다. 새 키를 입력해 교체하세요.' );
+	}
+
+	return $api_key;
+}
+
+/**
+ * Returns the encrypted administrator-entered API key without exposing it.
+ *
+ * @return string|WP_Error
+ */
+function personal_cta_threads_saved_openai_key() {
+	$envelope = get_option( PERSONAL_CTA_THREADS_OPENAI_KEY_OPTION, array() );
+
+	return is_array( $envelope ) && ! empty( $envelope ) ? personal_cta_threads_decrypt_openai_key( $envelope ) : '';
+}
+
+/**
+ * Checks for an encrypted administrator-entered API key without decrypting it.
+ *
+ * @return bool
+ */
+function personal_cta_threads_has_saved_openai_key() {
+	$envelope = get_option( PERSONAL_CTA_THREADS_OPENAI_KEY_OPTION, array() );
+
+	return is_array( $envelope )
+		&& 1 === (int) ( $envelope['v'] ?? 0 )
+		&& ! empty( $envelope['iv'] )
+		&& ! empty( $envelope['tag'] )
+		&& ! empty( $envelope['ciphertext'] );
+}
+
+/**
+ * Encrypts and stores a validated administrator-entered OpenAI API key.
+ *
+ * @param string $api_key API key.
+ * @return true|WP_Error
+ */
+function personal_cta_threads_save_openai_key( $api_key ) {
+	$api_key = trim( (string) $api_key );
+	if ( '' === $api_key || strlen( $api_key ) > 1024 || preg_match( '/[\x00-\x20\x7F]/', $api_key ) ) {
+		return new WP_Error( 'pct_openai_key_invalid', 'OpenAI API 키 형식을 확인하세요.' );
+	}
+
+	$encrypted = personal_cta_threads_encrypt_openai_key( $api_key );
+	if ( is_wp_error( $encrypted ) ) {
+		return $encrypted;
+	}
+
+	if ( false === get_option( PERSONAL_CTA_THREADS_OPENAI_KEY_OPTION, false ) ) {
+		if ( ! add_option( PERSONAL_CTA_THREADS_OPENAI_KEY_OPTION, $encrypted, '', false ) ) {
+			return new WP_Error( 'pct_openai_storage_failed', 'API 키를 저장하지 못했습니다.' );
+		}
+	} else {
+		update_option( PERSONAL_CTA_THREADS_OPENAI_KEY_OPTION, $encrypted, false );
+	}
+
+	return true;
+}
+
+/**
+ * Deletes the encrypted administrator-entered API key.
+ *
+ * @return void
+ */
+function personal_cta_threads_delete_openai_key() {
+	delete_option( PERSONAL_CTA_THREADS_OPENAI_KEY_OPTION );
 }
 
 /**

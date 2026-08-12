@@ -28,6 +28,18 @@ function personal_cta_threads_can_manage_post( $post_id ) {
  */
 function personal_cta_threads_sanitize_settings( $input ) {
 	$input = is_array( $input ) ? $input : array();
+	$api_key = isset( $input['openai_api_key'] ) && is_string( $input['openai_api_key'] ) ? trim( wp_unslash( $input['openai_api_key'] ) ) : '';
+
+	if ( '' !== $api_key ) {
+		$result = is_ssl()
+			? personal_cta_threads_save_openai_key( $api_key )
+			: new WP_Error( 'pct_openai_https_required', 'API 키는 HTTPS 관리자 화면에서만 저장할 수 있습니다.' );
+		if ( is_wp_error( $result ) ) {
+			add_settings_error( 'personal_cta_threads', 'openai_api_key', $result->get_error_message(), 'error' );
+		}
+	} elseif ( ! empty( $input['delete_openai_api_key'] ) ) {
+		personal_cta_threads_delete_openai_key();
+	}
 
 	return array(
 		'enabled'      => ! empty( $input['enabled'] ),
@@ -95,10 +107,13 @@ function personal_cta_threads_render_settings_page() {
 		return;
 	}
 
-	$settings = personal_cta_threads_settings();
-	$openai   = '' !== personal_cta_threads_config_secret( 'PERSONAL_CTA_OPENAI_API_KEY', 'OPENAI_API_KEY' );
+	$settings      = personal_cta_threads_settings();
+	$config_key    = personal_cta_threads_config_secret( 'PERSONAL_CTA_OPENAI_API_KEY', 'OPENAI_API_KEY' );
+	$stored_key    = personal_cta_threads_has_saved_openai_key();
+	$openai        = '' !== $config_key || $stored_key;
 	?>
 	<div class="wrap">
+		<?php settings_errors( 'personal_cta_threads' ); ?>
 		<h1>Threads 문구</h1>
 		<p>발행한 글의 편집 화면 오른쪽 패널에서 AI 문구를 만들고 복사합니다. Threads 업로드는 직접 합니다.</p>
 
@@ -123,17 +138,26 @@ function personal_cta_threads_render_settings_page() {
 					<td><code>gpt-5.6-sol</code></td>
 				</tr>
 			</table>
+			<hr>
+			<h2>OpenAI API</h2>
+			<table class="form-table" role="presentation">
+				<tr>
+					<th scope="row">OpenAI API 키</th>
+					<td>
+						<?php personal_cta_threads_admin_status_badge( $openai ); ?>
+						<p><label for="pct-openai-api-key">새 API 키</label><br><input id="pct-openai-api-key" name="<?php echo esc_attr( PERSONAL_CTA_THREADS_SETTINGS_OPTION ); ?>[openai_api_key]" type="password" class="regular-text" autocomplete="new-password" spellcheck="false" placeholder="<?php echo esc_attr( $stored_key ? '•••••••• (새 키 입력 시 교체)' : 'sk-...' ); ?>"></p>
+						<p class="description">입력한 키는 다시 표시하지 않으며 WordPress 보안 키로 암호화해 저장합니다. 빈칸으로 저장하면 기존 키를 유지합니다.</p>
+						<?php if ( $stored_key ) : ?>
+							<p><label><input type="checkbox" name="<?php echo esc_attr( PERSONAL_CTA_THREADS_SETTINGS_OPTION ); ?>[delete_openai_api_key]" value="1"> 저장된 관리자 키 삭제</label></p>
+						<?php endif; ?>
+						<?php if ( '' !== $config_key ) : ?>
+							<p class="description"><code>wp-config.php</code> 또는 서버 환경변수의 키가 현재 우선 적용됩니다.</p>
+						<?php endif; ?>
+					</td>
+				</tr>
+			</table>
 			<?php submit_button( '변경 사항 저장' ); ?>
 		</form>
-
-		<hr>
-		<h2>OpenAI API</h2>
-		<table class="widefat striped" style="max-width:780px">
-			<tbody>
-				<tr><th scope="row">OpenAI API 키</th><td><?php personal_cta_threads_admin_status_badge( $openai ); ?></td><td><code>PERSONAL_CTA_OPENAI_API_KEY</code> 또는 <code>OPENAI_API_KEY</code></td></tr>
-			</tbody>
-		</table>
-		<p class="description">API 키는 이 화면에 저장하거나 다시 표시하지 않습니다. 환경 변수 또는 <code>wp-config.php</code> 상수로 설정하세요.</p>
 	</div>
 	<?php
 }

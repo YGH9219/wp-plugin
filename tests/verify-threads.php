@@ -105,6 +105,7 @@ function wp_unschedule_hook( $hook ) { return true; }
 function get_posts( $args ) { return array(); }
 function wp_cache_delete( $key, $group = '' ) { return true; }
 function maybe_serialize( $value ) { return is_scalar( $value ) ? (string) $value : serialize( $value ); }
+function wp_salt( $scheme = 'auth' ) { return 'test-salt-' . $scheme; }
 
 require dirname( __DIR__ ) . '/includes/threads-core.php';
 require dirname( __DIR__ ) . '/includes/threads-openai.php';
@@ -118,6 +119,16 @@ function pct_assert( $condition, $message ) {
 pct_assert( 3 === personal_cta_threads_character_length( '가나다' ), 'Unicode length fallback is invalid.' );
 pct_assert( 5 === personal_cta_threads_length( '가😀' ), 'Threads emoji byte counting is invalid.' );
 pct_assert( 'test-openai-key' === personal_cta_threads_config_secret( 'PERSONAL_CTA_OPENAI_API_KEY', 'OPENAI_API_KEY' ), 'The standard OpenAI wp-config constant must be recognized.' );
+$stored_key = personal_cta_threads_save_openai_key( 'test-direct-openai-key' );
+pct_assert( true === $stored_key, 'The administrator API key must be saved.' );
+pct_assert( false === strpos( wp_json_encode( get_option( PERSONAL_CTA_THREADS_OPENAI_KEY_OPTION ) ), 'test-direct-openai-key' ), 'The administrator API key must never be stored in plaintext.' );
+pct_assert( 'test-direct-openai-key' === personal_cta_threads_saved_openai_key(), 'The encrypted administrator API key must decrypt server-side.' );
+pct_assert( 'test-openai-key' === personal_cta_threads_openai_key(), 'A wp-config API key must take priority over the saved administrator key.' );
+$tampered_key               = get_option( PERSONAL_CTA_THREADS_OPENAI_KEY_OPTION );
+$tampered_key['ciphertext'] = base64_encode( 'tampered' );
+update_option( PERSONAL_CTA_THREADS_OPENAI_KEY_OPTION, $tampered_key );
+pct_assert( is_wp_error( personal_cta_threads_saved_openai_key() ), 'A tampered administrator API key must be rejected.' );
+personal_cta_threads_save_openai_key( 'test-direct-openai-key' );
 pct_assert( "첫째\n둘째" === personal_cta_threads_clean_text( '<p>첫째</p><p>둘째</p>' ), 'HTML normalization is invalid.' );
 
 $source = personal_cta_threads_source( 7 );
