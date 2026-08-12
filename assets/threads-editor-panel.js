@@ -1,22 +1,24 @@
 ( function ( wp, config ) {
 	'use strict';
 
-	if ( ! wp || ! config || ! wp.plugins || ! wp.editPost || ! wp.element || ! wp.components || ! wp.data ) {
+	if ( ! wp || ! config || ! wp.plugins || ! wp.element || ! wp.components || ! wp.data ) {
 		return;
 	}
 
+	const editor = wp.editor || wp.editPost;
 	const registerPlugin = wp.plugins.registerPlugin;
-	const PluginDocumentSettingPanel = wp.editPost.PluginDocumentSettingPanel;
+	const PluginSidebar = editor && editor.PluginSidebar;
 	const createElement = wp.element.createElement;
 	const useEffect = wp.element.useEffect;
 	const useState = wp.element.useState;
 	const useSelect = wp.data.useSelect;
 	const Button = wp.components.Button;
 	const Notice = wp.components.Notice;
+	const PanelBody = wp.components.PanelBody;
 	const Spinner = wp.components.Spinner;
 	const TextareaControl = wp.components.TextareaControl;
 
-	if ( ! registerPlugin || ! PluginDocumentSettingPanel || ! useSelect ) {
+	if ( ! registerPlugin || ! PluginSidebar || ! PanelBody || ! useSelect ) {
 		return;
 	}
 
@@ -162,32 +164,37 @@
 		const disabled = ! postId || ! published || busy || working;
 
 		return createElement(
-			PluginDocumentSettingPanel,
+			PluginSidebar,
 			{
 				name: 'threads-copy',
 				title: 'Threads 문구',
+				icon: 'admin-post',
+				isPinnable: true,
 				className: 'pct-threads-editor-panel',
-				initialOpen: true,
 			},
-			! published && createElement( Notice, { status: 'warning', isDismissible: false }, '글을 먼저 발행하면 문구를 만들 수 있습니다.' ),
-			createElement( 'p', { className: 'pct-threads-editor-status', role: 'status', 'aria-live': 'polite' },
-				working && createElement( Spinner, null ),
-				status
-			),
-			displayedError && createElement( Notice, { status: 'error', isDismissible: false }, displayedError ),
-			createElement( TextareaControl, {
-				label: '복사할 문구',
-				value: copyText,
-				rows: 12,
-				readOnly: true,
-				help: copyText ? ( String( state.length || 0 ) + ' / 500자' ) : '생성된 문구가 여기에 표시됩니다.',
-			} ),
 			createElement(
-				'div',
-				{ className: 'pct-threads-editor-actions' },
-				createElement( Button, { variant: 'primary', onClick: function () { generate( false ); }, disabled: disabled, isBusy: busy }, '문구 만들기' ),
-				createElement( Button, { variant: 'secondary', onClick: function () { generate( true ); }, disabled: disabled }, '다시 생성' ),
-				createElement( Button, { variant: 'secondary', onClick: copy, disabled: busy || ! copyText }, '복사' )
+				PanelBody,
+				{ initialOpen: true },
+				! published && createElement( Notice, { status: 'warning', isDismissible: false }, '글을 먼저 발행하면 문구를 만들 수 있습니다.' ),
+				createElement( 'p', { className: 'pct-threads-editor-status', role: 'status', 'aria-live': 'polite' },
+					working && createElement( Spinner, null ),
+					status
+				),
+				displayedError && createElement( Notice, { status: 'error', isDismissible: false }, displayedError ),
+				createElement( TextareaControl, {
+					label: '복사할 문구',
+					value: copyText,
+					rows: 12,
+					readOnly: true,
+					help: copyText ? ( String( state.length || 0 ) + ' / 500자' ) : '생성된 문구가 여기에 표시됩니다.',
+				} ),
+				createElement(
+					'div',
+					{ className: 'pct-threads-editor-actions' },
+					createElement( Button, { variant: 'primary', onClick: function () { generate( false ); }, disabled: disabled, isBusy: busy }, '문구 만들기' ),
+					createElement( Button, { variant: 'secondary', onClick: function () { generate( true ); }, disabled: disabled }, '다시 생성' ),
+					createElement( Button, { variant: 'secondary', onClick: copy, disabled: busy || ! copyText }, '복사' )
+				)
 			)
 		);
 	}

@@ -18,9 +18,3 @@
 	flex-wrap: wrap;
 	gap: 8px;
 }
-
-@media (max-width: 782px) {
-	.pct-threads-editor-panel {
-		display: none;
-	}
-}

@@ -362,7 +362,7 @@ function personal_cta_threads_enqueue_editor_panel() {
 	wp_enqueue_script(
 		'personal-cta-threads-editor-panel',
 		PERSONAL_CTA_BLOCKS_URL . 'assets/threads-editor-panel.js',
-		array( 'wp-plugins', 'wp-edit-post', 'wp-element', 'wp-components', 'wp-data' ),
+		array( 'wp-plugins', 'wp-editor', 'wp-edit-post', 'wp-element', 'wp-components', 'wp-data' ),
 		PERSONAL_CTA_BLOCKS_VERSION,
 		true
 	);

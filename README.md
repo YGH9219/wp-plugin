@@ -3,7 +3,7 @@
 WordPress용 펄스 CTA 블록과 AI Threads 문구 생성 기능을 한 플러그인으로 제공합니다.
 
 - 글 편집기에서 `/ㅂㅌ`으로 반응형 CTA 버튼 추가
-- 발행한 글의 Gutenberg 오른쪽 사이드바에서 `Threads 문구` 생성
+- 글 편집기 상단의 `Threads 문구` 아이콘에서 문구 생성
 - 원문 사실 분석 → 독립 초안 3개 → 편집장 재작성
 - 문구 재생성·복사 후 Threads에 직접 업로드
 - 원문 링크와 선택적인 UTM을 복사 문구 끝에 자동 추가
@@ -35,10 +35,10 @@ define( 'PERSONAL_CTA_OPENAI_API_KEY', '...');
 2. WordPress 관리자에서 `설정 → Threads 문구`를 엽니다.
 3. 기능을 켜고 OpenAI API 키, 복사할 원문 링크와 UTM 사용 여부를 저장합니다.
 4. 일반 글을 발행한 뒤 PC에서 해당 글의 Gutenberg 편집 화면을 엽니다.
-5. 오른쪽 `글` 탭의 `Threads 문구` 패널에서 `문구 만들기`를 누릅니다.
+5. 상단 `게시/업데이트` 근처의 `Threads 문구` 아이콘을 눌러 전용 패널을 열고 `문구 만들기`를 누릅니다.
 6. 준비된 문구를 `복사`해 Threads에 직접 붙여넣고 업로드합니다.
 
-패널과 REST 요청은 해당 글을 편집할 수 있는 `manage_options` 권한 사용자에게만 제공됩니다. 모바일에서는 패널을 표시하지 않습니다.
+상단 아이콘, 패널과 REST 요청은 해당 글을 편집할 수 있는 `manage_options` 권한 사용자에게만 제공됩니다.
 
 모델은 URL을 만들지 않습니다. 링크 포함을 켜면 PHP가 공개 글 링크와 선택적인 UTM을 문구 끝에 붙이고, 이 링크 길이까지 Threads 500자 제한에 포함해 계산합니다.
 
@@ -69,6 +69,6 @@ docker run --rm --mount $mount -w /app php:7.4-cli sh -lc "find . -path ./dist -
 
 1. `personal-cta-blocks.php`, `blocks/pulse-button/block.json`, `blocks/pulse-button/editor.asset.php` 버전을 같은 값으로 올립니다.
 2. `main`에 커밋·푸시하고 CI를 확인합니다.
-3. 같은 버전의 태그를 푸시합니다. 예: `git tag v0.3.2` 후 `git push origin v0.3.2`.
+3. 같은 버전의 태그를 푸시합니다. 예: `git tag v0.3.3` 후 `git push origin v0.3.3`.
 
 태그가 푸시되면 GitHub Actions가 설치 가능한 `personal-cta-blocks-{version}.zip`을 만들고 GitHub Release에 올립니다. 플러그인 폴더명과 메인 파일명은 기존 자동 업데이트 호환성을 위해 변경하지 않습니다.
