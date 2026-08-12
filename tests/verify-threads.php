@@ -12,6 +12,20 @@ $test_options = array();
 $test_meta    = array();
 $test_remote_response = array();
 
+class Pct_Test_WPDB {
+	public $options = 'options';
+
+	public function prepare( $query, ...$args ) {
+		return $query;
+	}
+
+	public function query( $query ) {
+		return 1;
+	}
+}
+
+$wpdb = new Pct_Test_WPDB();
+
 class WP_Error {
 	private $code;
 	private $message;
@@ -176,6 +190,14 @@ $refusal = personal_cta_threads_openai_parse_response(
 );
 pct_assert( is_wp_error( $refusal ) && 'pct_openai_refusal' === $refusal->get_error_code(), 'A model refusal must never be treated as copy.' );
 
+$incomplete = personal_cta_threads_openai_parse_response(
+	array(
+		'status'             => 'incomplete',
+		'incomplete_details' => array( 'reason' => 'max_output_tokens' ),
+	)
+);
+pct_assert( is_wp_error( $incomplete ) && 'pct_openai_incomplete' === $incomplete->get_error_code() && false !== strpos( $incomplete->get_error_message(), '출력 한도' ), 'Output-token exhaustion must surface as a recoverable OpenAI error.' );
+
 $multiple_outputs = personal_cta_threads_openai_parse_response(
 	array(
 		'status' => 'completed',
@@ -218,6 +240,7 @@ $fact_schema = personal_cta_threads_fact_schema();
 foreach ( personal_cta_threads_content_value_keys() as $value_key ) {
 	pct_assert( in_array( $value_key, $fact_schema['required'], true ) && isset( $fact_schema['properties'][ $value_key ] ), 'Every grounded content-value field must be required by the FACT schema.' );
 }
+pct_assert( 12 === $fact_schema['properties']['facts']['maxItems'] && 1 === $fact_schema['properties']['facts']['items']['properties']['evidence']['maxItems'] && 2 === $fact_schema['properties']['reader_stakes']['maxItems'], 'FACT schema must bound analysis output to the Threads use case.' );
 $unknown_value_fact_map = $fact_map;
 $unknown_value_fact_map['why_it_matters'][0]['fact_ids'] = array( 'F999' );
 pct_assert( is_wp_error( personal_cta_threads_validate_fact_map( $unknown_value_fact_map, $source['text'] ) ), 'Content-value hints may only cite known FACT IDs.' );
@@ -229,6 +252,9 @@ foreach ( personal_cta_threads_content_value_keys() as $value_key ) {
 	$empty_value_fact_map[ $value_key ] = array();
 }
 pct_assert( true === personal_cta_threads_validate_fact_map( $empty_value_fact_map, $source['text'] ), 'Empty content-value fields must remain valid when the source offers no safe editorial hint.' );
+$too_many_values_fact_map = $fact_map;
+$too_many_values_fact_map['reader_stakes'] = array_fill( 0, 3, $fact_map['reader_stakes'][0] );
+pct_assert( is_wp_error( personal_cta_threads_validate_fact_map( $too_many_values_fact_map, $source['text'] ) ), 'FACT value lists must stay compact.' );
 $blocked_invalid_value_fact_map = $fact_map;
 $blocked_invalid_value_fact_map['blockers'] = array( '원문이 모순됩니다.' );
 unset( $blocked_invalid_value_fact_map['reader_stakes'] );
@@ -313,5 +339,19 @@ personal_cta_threads_set_state( 7, 'drafting', 'writer_h2_complete' );
 delete_post_meta( 7, '_pct_threads_lease_until' );
 pct_assert( true === personal_cta_threads_resume( 7 ), 'A stalled job must be requeued without discarding its checkpoints.' );
 pct_assert( 'drafting' === personal_cta_threads_meta( 7, 'status' ) && 'writer_h2_complete' === personal_cta_threads_meta( 7, 'stage' ), 'Resuming must preserve the generation checkpoint state.' );
+
+delete_post_meta( 7, '_pct_threads_final_text' );
+delete_post_meta( 7, '_pct_threads_source_hash' );
+delete_post_meta( 7, '_pct_threads_generation_key' );
+delete_post_meta( 7, '_pct_threads_fact_map' );
+delete_post_meta( 7, '_pct_threads_fact_cache_key' );
+delete_post_meta( 7, '_pct_threads_lease_until' );
+personal_cta_threads_set_state( 7, 'queued', 'queued' );
+$test_remote_response = array(
+	'response' => array( 'code' => 200 ),
+	'body'     => wp_json_encode( array( 'status' => 'incomplete', 'incomplete_details' => array( 'reason' => 'max_output_tokens' ) ) ),
+);
+personal_cta_threads_run_job( 7 );
+pct_assert( 'failed' === personal_cta_threads_meta( 7, 'status' ) && 'fact' === personal_cta_threads_meta( 7, 'stage' ), 'A failed model call must retain the concrete pipeline stage for diagnostics.' );
 
 echo "Threads copy-generation safeguards are valid.\n";

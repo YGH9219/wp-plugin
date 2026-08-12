@@ -671,7 +671,8 @@ function personal_cta_threads_run_job( $post_id ) {
 		personal_cta_threads_heartbeat( $post_id, 600 );
 		$result = personal_cta_threads_generate( $post_id, (bool) personal_cta_threads_meta( $post_id, 'regenerate', 0 ) );
 		if ( is_wp_error( $result ) ) {
-			personal_cta_threads_set_state( $post_id, 'failed', 'generation', $result->get_error_message() );
+			$stage = (string) personal_cta_threads_meta( $post_id, 'stage', 'generation' );
+			personal_cta_threads_set_state( $post_id, 'failed', '' !== $stage ? $stage : 'generation', $result->get_error_message() );
 			return;
 		}
 		if ( ! empty( $result['pending'] ) ) {

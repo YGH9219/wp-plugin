@@ -5,12 +5,12 @@
 
 defined( 'ABSPATH' ) || exit;
 
-define( 'PERSONAL_CTA_THREADS_FACT_PROMPT_VERSION', '4.0' );
+define( 'PERSONAL_CTA_THREADS_FACT_PROMPT_VERSION', '4.1' );
 define( 'PERSONAL_CTA_THREADS_WRITER_PROMPT_VERSION', '8.0' );
 define( 'PERSONAL_CTA_THREADS_EDITOR_PROMPT_VERSION', '5.0' );
 define( 'PERSONAL_CTA_THREADS_VERIFIER_PROMPT_VERSION', '2.0' );
 define( 'PERSONAL_CTA_THREADS_REPAIR_PROMPT_VERSION', '1.1' );
-define( 'PERSONAL_CTA_THREADS_SCHEMA_VERSION', '2.0' );
+define( 'PERSONAL_CTA_THREADS_SCHEMA_VERSION', '2.1' );
 
 /**
  * Returns a configured OpenAI API key, preferring wp-config or the environment.
@@ -114,7 +114,10 @@ function personal_cta_threads_openai_parse_response( $body, $http_status = 200 )
 	$status = isset( $decoded['status'] ) ? sanitize_key( (string) $decoded['status'] ) : '';
 	if ( 'incomplete' === $status ) {
 		$reason = isset( $decoded['incomplete_details']['reason'] ) ? sanitize_key( (string) $decoded['incomplete_details']['reason'] ) : 'unknown';
-		return new WP_Error( 'pct_openai_incomplete', 'OpenAI 응답이 완료되지 않았습니다. 사유: ' . $reason );
+		$message = 'max_output_tokens' === $reason
+			? 'OpenAI 응답이 출력 한도에 도달했습니다. 다시 생성하세요.'
+			: 'OpenAI 응답이 완료되지 않았습니다. 사유: ' . $reason;
+		return new WP_Error( 'pct_openai_incomplete', $message );
 	}
 	if ( 'completed' !== $status ) {
 		return new WP_Error( 'pct_openai_failed', 'OpenAI가 요청을 완료하지 못했습니다.' );
@@ -285,7 +288,7 @@ function personal_cta_threads_fact_schema() {
 	foreach ( personal_cta_threads_content_value_keys() as $key ) {
 		$value_fields[ $key ] = array(
 			'type'     => 'array',
-			'maxItems' => 4,
+			'maxItems' => 2,
 			'items'    => $value_item,
 		);
 	}
@@ -301,7 +304,7 @@ function personal_cta_threads_fact_schema() {
 			'facts'            => array(
 				'type'     => 'array',
 				'minItems' => 0,
-				'maxItems' => 24,
+				'maxItems' => 12,
 				'items'    => array(
 					'type'                 => 'object',
 					'additionalProperties' => false,
@@ -312,6 +315,7 @@ function personal_cta_threads_fact_schema() {
 						'evidence'      => array(
 							'type'     => 'array',
 							'minItems' => 1,
+							'maxItems' => 1,
 							'items'    => array(
 								'type'                 => 'object',
 								'additionalProperties' => false,
@@ -322,7 +326,7 @@ function personal_cta_threads_fact_schema() {
 								),
 							),
 						),
-						'must_preserve' => array( 'type' => 'array', 'items' => array( 'type' => 'string' ) ),
+						'must_preserve' => array( 'type' => 'array', 'maxItems' => 4, 'items' => array( 'type' => 'string' ) ),
 					),
 				),
 			),
@@ -341,7 +345,7 @@ function personal_cta_threads_fact_schema() {
 							'enum' => array( 'mistake_prevention', 'convenience', 'warning', 'savings', 'speed', 'comparison', 'myth_busting', 'opportunity', 'other' ),
 						),
 						'premise'  => array( 'type' => 'string' ),
-						'fact_ids' => array( 'type' => 'array', 'minItems' => 1, 'items' => array( 'type' => 'string' ) ),
+						'fact_ids' => array( 'type' => 'array', 'minItems' => 1, 'maxItems' => 4, 'items' => array( 'type' => 'string' ) ),
 					),
 				),
 			),
@@ -430,10 +434,10 @@ function personal_cta_threads_fact_prompt() {
 
 # Task
 1. 주제, 독자의 실제 문제, 원문이 제시하는 가장 큰 해결책을 짧게 적는다.
-2. Threads 글에 쓸 수 있는 핵심 사실을 facts에 만든다. 숫자, 금액, 날짜, 기간, 조건, 예외, 가능성 표현, 경고는 빠뜨리거나 바꾸지 않는다.
-3. 각 사실에 F1부터 중복 없는 ID를 붙인다. evidence에는 직접 근거가 있는 source_id와 그 문단에서 글자 그대로 복사한 짧은 quote를 넣는다. 요약문이나 바꿔 쓴 문장을 quote로 쓰지 않는다.
-4. 축약 과정에서도 그대로 보존해야 할 숫자·금액·날짜·기간·짧은 조건·예외·가능성 표현만 must_preserve에 원문 표현대로 적는다. 없으면 빈 배열을 쓴다. 일반 문장, 일반 명사, 제목, 넓은 주장은 넣지 않는다.
-5. facts를 바탕으로 아래 7개 편집 선택용 메모 배열을 만든다: reader_stakes, common_mistakes, why_it_matters, unexpected_points, actionable_payoffs, curiosity_gaps, weak_points_for_copy. 각 항목은 text와 이미 존재하는 fact_ids를 가진다. 원문이 직접 지지하지 않으면 해당 배열을 빈 배열로 둔다.
+2. Threads 글에 쓸 수 있는 핵심 사실만 facts에 최대 12개 만든다. 한 fact는 한 주장으로 쪼개고, 숫자, 금액, 날짜, 기간, 조건, 예외, 가능성 표현, 경고는 빠뜨리거나 바꾸지 않는다.
+3. 각 사실에 F1부터 중복 없는 ID를 붙인다. evidence에는 직접 근거가 있는 source_id와 그 문단에서 글자 그대로 복사한 짧은 quote를 정확히 1개 넣는다. 요약문이나 바꿔 쓴 문장을 quote로 쓰지 않는다.
+4. 축약 과정에서도 그대로 보존해야 할 숫자·금액·날짜·기간·짧은 조건·예외·가능성 표현만 must_preserve에 원문 표현대로 최대 4개 적는다. 없으면 빈 배열을 쓴다. 일반 문장, 일반 명사, 제목, 넓은 주장은 넣지 않는다.
+5. facts를 바탕으로 아래 7개 편집 선택용 메모 배열을 만든다: reader_stakes, common_mistakes, why_it_matters, unexpected_points, actionable_payoffs, curiosity_gaps, weak_points_for_copy. 각 배열은 최대 2개의 짧은 항목만 가진다. 각 항목은 text와 이미 존재하는 fact_ids를 가진다. 원문이 직접 지지하지 않으면 해당 배열을 빈 배열로 둔다.
 6. 이 7개 배열은 최종 본문에 복사할 사실이 아니라, 무엇을 앞에 놓고 무엇을 덜어낼지 고르는 내부 편집 메모다. final text의 모든 사실 주장은 이후에도 claims와 F ID로 다시 추적해야 한다. 특히 common_mistakes는 원문이 잘못된 순서·피해야 할 행동·주의점을 직접 뒷받침할 때만 쓰고, weak_points_for_copy는 공개 문장으로 쓰지 않는다.
 7. 원문이 실제로 지지하는 서로 다른 후킹 방향을 정확히 3개 만든다. H1, H2, H3을 사용한다. 억지 손실회피나 공포, 보장되지 않은 혜택·위험·결과는 금지한다.
 8. 각 후킹 방향은 근거 fact_ids를 하나 이상 가져야 한다.
@@ -727,7 +731,7 @@ function personal_cta_threads_fact_id_set( $fact_map ) {
  */
 function personal_cta_threads_validate_content_value_map( $fact_map, $known_fact_ids ) {
 	foreach ( personal_cta_threads_content_value_keys() as $key ) {
-		if ( ! array_key_exists( $key, $fact_map ) || ! is_array( $fact_map[ $key ] ) || count( $fact_map[ $key ] ) > 4 ) {
+		if ( ! array_key_exists( $key, $fact_map ) || ! is_array( $fact_map[ $key ] ) || count( $fact_map[ $key ] ) > 2 ) {
 			return new WP_Error( 'pct_invalid_fact_map', 'FACT MAP의 편집 선택 메모가 올바르지 않습니다.' );
 		}
 		foreach ( $fact_map[ $key ] as $item ) {
@@ -757,7 +761,7 @@ function personal_cta_threads_validate_content_value_map( $fact_map, $known_fact
  * @return true|WP_Error
  */
 function personal_cta_threads_validate_fact_map( $fact_map, $source ) {
-	if ( ! is_array( $fact_map ) || ! isset( $fact_map['facts'], $fact_map['hook_angles'], $fact_map['blockers'] ) || ! is_array( $fact_map['facts'] ) || ! is_array( $fact_map['hook_angles'] ) || ! is_array( $fact_map['blockers'] ) ) {
+	if ( ! is_array( $fact_map ) || ! isset( $fact_map['facts'], $fact_map['hook_angles'], $fact_map['blockers'] ) || ! is_array( $fact_map['facts'] ) || ! is_array( $fact_map['hook_angles'] ) || ! is_array( $fact_map['blockers'] ) || count( $fact_map['facts'] ) > 12 ) {
 		return new WP_Error( 'pct_invalid_fact_map', 'FACT MAP의 필수 항목이 올바르지 않습니다.' );
 	}
 	$has_blockers = false;
@@ -773,7 +777,7 @@ function personal_cta_threads_validate_fact_map( $fact_map, $source ) {
 	foreach ( $fact_map['facts'] as $fact_index => $fact ) {
 		$id       = is_array( $fact ) && isset( $fact['id'] ) ? (string) $fact['id'] : '';
 		$evidence = is_array( $fact ) && isset( $fact['evidence'] ) && is_array( $fact['evidence'] ) ? $fact['evidence'] : array();
-		if ( 'F' . ( $fact_index + 1 ) !== $id || isset( $fact_ids[ $id ] ) || empty( $fact['claim'] ) || empty( $evidence ) ) {
+		if ( 'F' . ( $fact_index + 1 ) !== $id || isset( $fact_ids[ $id ] ) || empty( $fact['claim'] ) || empty( $evidence ) || count( $evidence ) > 1 ) {
 			return new WP_Error( 'pct_invalid_fact_map', 'FACT MAP의 사실 ID 또는 근거가 올바르지 않습니다.' );
 		}
 		$cited_segments = array();
@@ -792,7 +796,7 @@ function personal_cta_threads_validate_fact_map( $fact_map, $source ) {
 			}
 			$cited_segments[] = $segments[ $source_id ];
 		}
-		if ( ! isset( $fact['must_preserve'] ) || ! is_array( $fact['must_preserve'] ) ) {
+		if ( ! isset( $fact['must_preserve'] ) || ! is_array( $fact['must_preserve'] ) || count( $fact['must_preserve'] ) > 4 ) {
 			return new WP_Error( 'pct_invalid_fact_map', 'FACT MAP의 보존 항목이 올바르지 않습니다.' );
 		}
 		foreach ( $fact['must_preserve'] as $token ) {
@@ -830,7 +834,7 @@ function personal_cta_threads_validate_fact_map( $fact_map, $source ) {
 	foreach ( $fact_map['hook_angles'] as $hook ) {
 		$id   = is_array( $hook ) && isset( $hook['id'] ) ? (string) $hook['id'] : '';
 		$refs = is_array( $hook ) && isset( $hook['fact_ids'] ) && is_array( $hook['fact_ids'] ) ? $hook['fact_ids'] : array();
-		if ( ! in_array( $id, array( 'H1', 'H2', 'H3' ), true ) || isset( $hook_ids[ $id ] ) || empty( $hook['premise'] ) || empty( $refs ) ) {
+		if ( ! in_array( $id, array( 'H1', 'H2', 'H3' ), true ) || isset( $hook_ids[ $id ] ) || empty( $hook['premise'] ) || empty( $refs ) || count( $refs ) > 4 ) {
 			return new WP_Error( 'pct_invalid_fact_map', 'FACT MAP의 후킹 전략이 올바르지 않습니다.' );
 		}
 		foreach ( $refs as $fact_id ) {
@@ -1250,7 +1254,7 @@ function personal_cta_threads_generate( $post_id, $regenerate = false ) {
 			personal_cta_threads_fact_prompt(),
 			array( 'source_document' => $source['text'] ),
 			personal_cta_threads_fact_schema(),
-			4096
+			8192
 		);
 		if ( is_wp_error( $response ) ) {
 			return $response;

@@ -286,6 +286,7 @@
 					'7분 이상 새 단계가 확인되지 않았습니다. 예약 작업 또는 AI 응답이 지연된 상태일 수 있습니다.',
 					createElement( Button, { variant: 'secondary', onClick: resume, disabled: busy }, '작업 다시 예약' )
 				),
+				'failed' === state.status && state.stage && createElement( 'p', { className: 'pct-threads-editor-progress' }, '실패 단계: ' + ( stages[ state.stage ] || state.stage ) ),
 				displayedError && createElement( Notice, { status: 'error', isDismissible: false }, displayedError ),
 				createElement( TextareaControl, {
 					label: '복사할 문구',
