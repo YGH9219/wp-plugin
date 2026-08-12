@@ -10,6 +10,7 @@ define( 'DAY_IN_SECONDS', 86400 );
 
 $test_options = array();
 $test_meta    = array();
+$test_remote_response = array();
 
 class WP_Error {
 	private $code;
@@ -79,7 +80,7 @@ function sanitize_key( $value ) { return preg_replace( '/[^a-z0-9_\-]/', '', str
 function sanitize_text_field( $value ) { return trim( strip_tags( (string) $value ) ); }
 function sanitize_textarea_field( $value ) { return trim( strip_tags( (string) $value ) ); }
 function wp_strip_all_tags( $value, $remove_breaks = false ) { return strip_tags( (string) $value ); }
-function wp_json_encode( $value ) { return json_encode( $value, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES ); }
+function wp_json_encode( $value, $options = 0, $depth = 512 ) { return json_encode( $value, $options, $depth ); }
 function esc_url_raw( $value ) { return (string) $value; }
 function get_permalink( $post_id ) { return 'https://example.test/sample-post/'; }
 function add_query_arg( $args, $url ) { return $url . '?' . http_build_query( $args ); }
@@ -106,6 +107,9 @@ function get_posts( $args ) { return array(); }
 function wp_cache_delete( $key, $group = '' ) { return true; }
 function maybe_serialize( $value ) { return is_scalar( $value ) ? (string) $value : serialize( $value ); }
 function wp_salt( $scheme = 'auth' ) { return 'test-salt-' . $scheme; }
+function wp_remote_post( $url, $args = array() ) { global $test_remote_response; return $test_remote_response; }
+function wp_remote_retrieve_body( $response ) { return isset( $response['body'] ) ? $response['body'] : ''; }
+function wp_remote_retrieve_response_code( $response ) { return isset( $response['response']['code'] ) ? (int) $response['response']['code'] : 0; }
 
 require dirname( __DIR__ ) . '/includes/threads-core.php';
 require dirname( __DIR__ ) . '/includes/threads-openai.php';
@@ -210,6 +214,34 @@ $copy = array(
 	'claims'        => array( array( 'text' => '첫 문단입니다.', 'fact_ids' => array( 'F1' ) ) ),
 );
 pct_assert( true === personal_cta_threads_validate_copy( $copy, $fact_map, 'H1' ), 'A grounded copy must pass semantic validation.' );
+$missing_copy         = $copy;
+$missing_copy['text'] = '확인해봐.';
+$missing_error        = personal_cta_threads_validate_copy( $missing_copy, $fact_map, 'H1' );
+pct_assert( is_wp_error( $missing_error ) && 'pct_missing_preserve' === $missing_error->get_error_code(), 'Missing literal preservation must return a dedicated error.' );
+pct_assert( in_array( '첫 문단', (array) $missing_error->get_error_data()['missing_tokens'], true ), 'Missing preservation errors must identify the omitted source token.' );
+$optional_fact_map                              = $fact_map;
+$optional_fact_map['facts'][0]['must_preserve'] = array();
+pct_assert( true === personal_cta_threads_validate_copy( $missing_copy, $optional_fact_map, 'H1' ), 'Facts without literal preservation requirements must remain valid.' );
+$literal_repair = personal_cta_threads_queue_literal_repair( 7, $missing_copy, 'writer', 'H1', array( '첫 문단' ) );
+pct_assert( is_array( $literal_repair ) && ! empty( $literal_repair['pending'] ), 'Missing literals must schedule one repair step.' );
+pct_assert( 'writer' === personal_cta_threads_meta( 7, 'literal_repair' )['target'], 'Literal repair must remember the writer target.' );
+$zero_literal_repair = personal_cta_threads_queue_literal_repair( 7, $missing_copy, 'writer', 'H1', array( '0' ) );
+pct_assert( is_array( $zero_literal_repair ) && in_array( '0', personal_cta_threads_meta( 7, 'literal_repair' )['missing_tokens'], true ), 'A zero value must remain a required literal.' );
+$literal_repair = personal_cta_threads_queue_literal_repair( 7, $missing_copy, 'writer', 'H1', array( '첫 문단' ) );
+$test_remote_response = array(
+	'response' => array( 'code' => 200 ),
+	'body'     => wp_json_encode( array(
+		'id'     => 'resp_literal_repair',
+		'status' => 'completed',
+		'output' => array( array( 'type' => 'message', 'content' => array( array( 'type' => 'output_text', 'text' => wp_json_encode( $copy ) ) ) ) ),
+	) ),
+);
+$repaired_copy = personal_cta_threads_run_literal_repair( 7, $source, $fact_map );
+pct_assert( is_array( $repaired_copy ) && ! empty( $repaired_copy['pending'] ), 'Literal repair must resume generation after one corrected model call.' );
+pct_assert( $copy === personal_cta_threads_meta( 7, 'drafts' )['H1'], 'Literal repair must replace the affected writer draft.' );
+$length_literal_repair = personal_cta_threads_queue_literal_repair( 7, $missing_copy, 'repair', 'H1', array( '첫 문단' ) );
+$length_repaired_copy  = personal_cta_threads_run_literal_repair( 7, $source, $fact_map );
+pct_assert( is_array( $length_literal_repair ) && is_array( $length_repaired_copy ) && $copy === personal_cta_threads_meta( 7, 'repair_result' ), 'Length-repair literals must stay in the length-repair result.' );
 
 $units = personal_cta_threads_candidate_units( $copy['text'] );
 $verification = array(
