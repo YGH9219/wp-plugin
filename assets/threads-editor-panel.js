@@ -31,6 +31,29 @@
 		ready: '문구가 준비되었습니다. 복사해 Threads에 직접 올리세요.',
 		failed: '문구 생성에 실패했습니다.',
 	};
+	const stages = {
+		queued: '대기열에 등록됨',
+		waiting_lock: '다른 작업이 끝나길 기다리는 중',
+		fact: '1/5 원문의 숫자·조건 분석',
+		writer_h1: '2/5 초안 1/3 작성',
+		writer_h1_complete: '2/5 초안 1/3 완료',
+		writer_h2: '3/5 초안 2/3 작성',
+		writer_h2_complete: '3/5 초안 2/3 완료',
+		writer_h3: '4/5 초안 3/3 작성',
+		writer_h3_complete: '4/5 초안 3/3 완료',
+		editor: '5/5 최종 문구 편집',
+		editor_complete: '5/5 최종 문구 점검',
+		literal_repair: '필수 숫자·조건 보정',
+		repair: '500자 제한에 맞춰 정리',
+		repair_complete: '최종 길이 점검',
+		ready: '완료',
+	};
+
+	function elapsedLabel( timestamp ) {
+		const seconds = Math.max( 0, Math.floor( Date.now() / 1000 ) - Number( timestamp || 0 ) );
+
+		return seconds < 60 ? seconds + '초 전' : Math.floor( seconds / 60 ) + '분 전';
+	}
 
 	function endpoint( postId, suffix ) {
 		return config.root.replace( /\/?$/, '/' ) + 'threads/' + encodeURIComponent( postId ) + ( suffix || '' );
@@ -134,6 +157,22 @@
 				setError( requestError.message );
 			} ).finally( function () {
 				setBusy( false );
+				setMessage( '' );
+			} );
+		}
+
+		function resume() {
+			setError( '' );
+			setMessage( '멈춘 작업을 다시 예약하는 중…' );
+			setBusy( true );
+
+			request( postId, '/resume', 'POST' ).then( function ( nextState ) {
+				setState( nextState );
+			} ).catch( function ( requestError ) {
+				setError( requestError.message );
+			} ).finally( function () {
+				setBusy( false );
+				setMessage( '' );
 			} );
 		}
 
@@ -159,7 +198,11 @@
 		const working = Boolean( state.poll );
 		const published = 'publish' === postStatus;
 		const copyText = state.copy_text || '';
-		const status = message || labels[ state.status ] || ( '상태: ' + state.status );
+		const activityAt = Number( state.last_heartbeat || state.updated_at || 0 );
+		const stale = working && activityAt && Math.floor( Date.now() / 1000 ) - activityAt >= 420;
+		const status = working
+			? ( busy && message ? message : ( labels[ state.status ] || ( '상태: ' + state.status ) ) )
+			: ( message || labels[ state.status ] || ( '상태: ' + state.status ) );
 		const displayedError = error || ( 'failed' === state.status ? state.last_error : '' );
 		const disabled = ! postId || ! published || busy || working;
 
@@ -179,6 +222,12 @@
 				createElement( 'p', { className: 'pct-threads-editor-status', role: 'status', 'aria-live': 'polite' },
 					working && createElement( Spinner, null ),
 					status
+				),
+				working && createElement( 'p', { className: 'pct-threads-editor-progress' }, '진행 단계: ' + ( stages[ state.stage ] || state.stage || '작업 준비' ) ),
+				working && activityAt && createElement( 'p', { className: 'pct-threads-editor-progress' }, '마지막 서버 활동: ' + elapsedLabel( activityAt ) ),
+				stale && createElement( Notice, { status: 'warning', isDismissible: false },
+					'7분 이상 새 단계가 확인되지 않았습니다. 예약 작업 또는 AI 응답이 지연된 상태일 수 있습니다.',
+					createElement( Button, { variant: 'secondary', onClick: resume, disabled: busy }, '작업 다시 예약' )
 				),
 				displayedError && createElement( Notice, { status: 'error', isDismissible: false }, displayedError ),
 				createElement( TextareaControl, {

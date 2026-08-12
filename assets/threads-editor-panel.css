@@ -9,6 +9,16 @@
 	gap: 6px;
 }
 
+.pct-threads-editor-panel .pct-threads-editor-progress {
+	margin: 0 0 6px;
+	color: #50575e;
+	font-size: 12px;
+}
+
+.pct-threads-editor-panel .components-notice .components-button {
+	margin: 8px 0 0;
+}
+
 .pct-threads-editor-panel .components-spinner {
 	margin: 0;
 }

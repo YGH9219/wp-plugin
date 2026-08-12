@@ -260,5 +260,8 @@ pct_assert( is_wp_error( personal_cta_threads_validate_verifier( $missing_check,
 $queued = personal_cta_threads_queue( 7, false );
 pct_assert( true === $queued, 'A copy-generation request must queue successfully.' );
 pct_assert( 'queued' === personal_cta_threads_meta( 7, 'status' ), 'A copy-generation request must never publish the post.' );
+pct_assert( (int) personal_cta_threads_meta( 7, 'last_heartbeat', 0 ) > 0 && (int) personal_cta_threads_meta( 7, 'lease_until', 0 ) > time(), 'A queued job must be recoverable by the watchdog.' );
+delete_post_meta( 7, '_pct_threads_lease_until' );
+pct_assert( true === personal_cta_threads_resume( 7 ), 'A stalled job must be requeued without discarding its checkpoints.' );
 
 echo "Threads copy-generation safeguards are valid.\n";

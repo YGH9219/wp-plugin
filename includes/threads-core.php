@@ -274,9 +274,21 @@ function personal_cta_threads_state( $post_id ) {
 		'remote_url'     => (string) personal_cta_threads_meta( $post_id, 'remote_url' ),
 		'published_at'   => (int) personal_cta_threads_meta( $post_id, 'published_at', 0 ),
 		'updated_at'     => (int) personal_cta_threads_meta( $post_id, 'updated_at', 0 ),
+		'last_heartbeat' => (int) personal_cta_threads_meta( $post_id, 'last_heartbeat', 0 ),
+		'lease_until'    => (int) personal_cta_threads_meta( $post_id, 'lease_until', 0 ),
 		'length'         => personal_cta_threads_length( (string) personal_cta_threads_meta( $post_id, 'final_text' ) ),
 		'verifier_state' => (string) personal_cta_threads_meta( $post_id, 'verifier_state', 'not_run' ),
 	);
+}
+
+/**
+ * Whether a copy-generation job is still expected to run.
+ *
+ * @param string $status State.
+ * @return bool
+ */
+function personal_cta_threads_is_working( $status ) {
+	return in_array( (string) $status, array( 'queued', 'analyzing', 'drafting', 'editing' ), true );
 }
 
 /**
@@ -578,13 +590,25 @@ function personal_cta_threads_heartbeat( $post_id, $seconds = 240 ) {
  */
 function personal_cta_threads_continue_job( $post_id, $delay = 1 ) {
 	$args = array( (int) $post_id );
+	$delay = max( 0, (int) $delay );
 	if ( wp_next_scheduled( PERSONAL_CTA_THREADS_JOB_HOOK, $args ) ) {
 		return true;
 	}
 
-	$result = wp_schedule_single_event( time() + max( 1, (int) $delay ), PERSONAL_CTA_THREADS_JOB_HOOK, $args, true );
+	$result = wp_schedule_single_event( time() + $delay, PERSONAL_CTA_THREADS_JOB_HOOK, $args, true );
 
 	return false === $result ? new WP_Error( 'pct_schedule_failed', '다음 Threads 작업 예약에 실패했습니다.' ) : $result;
+}
+
+/**
+ * Starts due jobs after the caller has released its post lock.
+ *
+ * @return void
+ */
+function personal_cta_threads_kick_cron() {
+	if ( function_exists( 'spawn_cron' ) ) {
+		spawn_cron();
+	}
 }
 
 /**
@@ -601,9 +625,11 @@ function personal_cta_threads_queue( $post_id, $regenerate = false ) {
 
 	personal_cta_threads_set_meta( $post_id, 'regenerate', $regenerate ? 1 : 0 );
 	personal_cta_threads_set_state( $post_id, 'queued', 'queued' );
+	personal_cta_threads_heartbeat( $post_id, 600 );
 
-	$result = personal_cta_threads_continue_job( $post_id );
+	$result = personal_cta_threads_continue_job( $post_id, 0 );
 	if ( is_wp_error( $result ) ) {
+		delete_post_meta( $post_id, '_pct_threads_lease_until' );
 		personal_cta_threads_set_state( $post_id, 'failed', 'queue', $result->get_error_message() );
 		return $result;
 	}
@@ -623,6 +649,20 @@ function personal_cta_threads_run_job( $post_id ) {
 	}
 	$lock = personal_cta_threads_lock( $post_id, 1800 );
 	if ( is_wp_error( $lock ) ) {
+		$status         = (string) personal_cta_threads_meta( $post_id, 'status', 'idle' );
+		$last_heartbeat = (int) personal_cta_threads_meta( $post_id, 'last_heartbeat', 0 );
+		if ( personal_cta_threads_is_working( $status ) ) {
+			if ( 0 === $last_heartbeat || $last_heartbeat + 600 < time() ) {
+				personal_cta_threads_set_state( $post_id, $status, 'waiting_lock' );
+				personal_cta_threads_heartbeat( $post_id, 90 );
+			}
+			$retry = personal_cta_threads_continue_job( $post_id, 90 );
+			if ( is_wp_error( $retry ) ) {
+				delete_post_meta( $post_id, '_pct_threads_lease_until' );
+				personal_cta_threads_set_state( $post_id, 'failed', 'queue', $retry->get_error_message() );
+			}
+		}
+
 		return;
 	}
 	$keep_lease = false;
@@ -649,6 +689,34 @@ function personal_cta_threads_run_job( $post_id ) {
 		}
 		personal_cta_threads_unlock( $lock );
 	}
+}
+
+/**
+ * Requeues a stalled job without discarding completed model checkpoints.
+ *
+ * @param int $post_id Post ID.
+ * @return true|WP_Error
+ */
+function personal_cta_threads_resume( $post_id ) {
+	$status      = (string) personal_cta_threads_meta( $post_id, 'status', 'idle' );
+	$lease_until = (int) personal_cta_threads_meta( $post_id, 'lease_until', 0 );
+	if ( ! personal_cta_threads_is_working( $status ) ) {
+		return new WP_Error( 'pct_not_pending', '다시 예약할 Threads 작업이 없습니다.' );
+	}
+	if ( $lease_until >= time() ) {
+		return new WP_Error( 'pct_busy', 'Threads 작업이 아직 진행 중입니다.' );
+	}
+
+	personal_cta_threads_set_state( $post_id, $status, 'queued' );
+	personal_cta_threads_heartbeat( $post_id, 600 );
+	$result = personal_cta_threads_continue_job( $post_id, 0 );
+	if ( is_wp_error( $result ) ) {
+		delete_post_meta( $post_id, '_pct_threads_lease_until' );
+		personal_cta_threads_set_state( $post_id, 'failed', 'queue', $result->get_error_message() );
+		return $result;
+	}
+
+	return true;
 }
 add_action( PERSONAL_CTA_THREADS_JOB_HOOK, 'personal_cta_threads_run_job', 10, 1 );
 
@@ -701,11 +769,24 @@ function personal_cta_threads_watchdog() {
 			'fields'         => 'ids',
 			'posts_per_page' => 20,
 			'meta_query'     => array(
+				'relation' => 'AND',
 				array(
-					'key'     => '_pct_threads_lease_until',
-					'value'   => time(),
-					'compare' => '<',
-					'type'    => 'NUMERIC',
+					'key'     => '_pct_threads_status',
+					'value'   => array( 'queued', 'analyzing', 'drafting', 'editing' ),
+					'compare' => 'IN',
+				),
+				array(
+					'relation' => 'OR',
+					array(
+						'key'     => '_pct_threads_lease_until',
+						'value'   => time(),
+						'compare' => '<',
+						'type'    => 'NUMERIC',
+					),
+					array(
+						'key'     => '_pct_threads_lease_until',
+						'compare' => 'NOT EXISTS',
+					),
 				),
 			),
 		)
@@ -713,7 +794,7 @@ function personal_cta_threads_watchdog() {
 
 	foreach ( $post_ids as $post_id ) {
 		$status = personal_cta_threads_meta( $post_id, 'status' );
-		if ( in_array( $status, array( 'queued', 'analyzing', 'drafting', 'editing' ), true ) ) {
+		if ( personal_cta_threads_is_working( $status ) ) {
 			personal_cta_threads_continue_job( $post_id );
 		}
 	}

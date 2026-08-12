@@ -208,6 +208,12 @@ function personal_cta_threads_register_rest_routes() {
 			'regenerate' => array( 'sanitize_callback' => 'rest_sanitize_boolean', 'default' => false ),
 		) ),
 	) );
+	register_rest_route( 'personal-cta/v1', $base . '/resume', array(
+		'methods'             => 'POST',
+		'callback'            => 'personal_cta_threads_rest_resume',
+		'permission_callback' => 'personal_cta_threads_rest_permission',
+		'args'                => $id,
+	) );
 }
 add_action( 'rest_api_init', 'personal_cta_threads_register_rest_routes' );
 
@@ -228,6 +234,7 @@ function personal_cta_threads_rest_error( $error, $fallback = 500 ) {
 		'pct_text_too_long'   => 422,
 		'pct_locked'          => 409,
 		'pct_busy'            => 409,
+		'pct_not_pending'     => 409,
 	);
 	$code = sanitize_key( $error->get_error_code() );
 
@@ -250,7 +257,7 @@ function personal_cta_threads_admin_state( $post_id ) {
 	$payload = '' === $text ? null : personal_cta_threads_payload_text( $post_id, $text );
 
 	$state['copy_text'] = '';
-	$state['poll']      = in_array( $state['status'], array( 'queued', 'analyzing', 'drafting', 'editing' ), true );
+	$state['poll']      = personal_cta_threads_is_working( $state['status'] );
 	if ( is_array( $payload ) ) {
 		$state['copy_text'] = (string) $payload['text'];
 		$state['length']    = (int) $payload['length'];
@@ -300,7 +307,7 @@ function personal_cta_threads_rest_mutation_lock( $post_id ) {
 	}
 
 	$status = (string) personal_cta_threads_meta( $post_id, 'status', 'idle' );
-	if ( in_array( $status, array( 'queued', 'analyzing', 'drafting', 'editing' ), true ) ) {
+	if ( personal_cta_threads_is_working( $status ) ) {
 		personal_cta_threads_unlock( $lock );
 
 		return new WP_Error( 'pct_busy', '이 글의 문구 생성 작업이 진행 중입니다. 완료 후 다시 시도하세요.', array( 'status' => 409 ) );
@@ -334,6 +341,31 @@ function personal_cta_threads_rest_generate( $request ) {
 	} finally {
 		personal_cta_threads_unlock( $lock );
 	}
+
+	personal_cta_threads_kick_cron();
+
+	return new WP_REST_Response( personal_cta_threads_admin_state( $post_id ), 202 );
+}
+
+/**
+ * Requeues a stalled generation without starting a new one.
+ *
+ * @param WP_REST_Request $request Request.
+ * @return WP_REST_Response|WP_Error
+ */
+function personal_cta_threads_rest_resume( $request ) {
+	$post_id = absint( $request['id'] );
+	$ready   = personal_cta_threads_rest_ready( $post_id );
+	if ( is_wp_error( $ready ) ) {
+		return $ready;
+	}
+
+	$result = personal_cta_threads_resume( $post_id );
+	if ( is_wp_error( $result ) ) {
+		return personal_cta_threads_rest_error( $result, 409 );
+	}
+
+	personal_cta_threads_kick_cron();
 
 	return new WP_REST_Response( personal_cta_threads_admin_state( $post_id ), 202 );
 }
