@@ -246,10 +246,11 @@ $failed_response = personal_cta_threads_openai_parse_response(
 pct_assert( is_wp_error( $failed_response ) && 'pct_openai_failed' === $failed_response->get_error_code() && false !== strpos( $failed_response->get_error_message(), '상태: failed / server_error' ), 'A non-completed response must expose its status and remote error code.' );
 
 $quality_schema = personal_cta_threads_quality_schema();
-pct_assert( false === $quality_schema['additionalProperties'] && array( 'decision', 'issues' ) === $quality_schema['required'] && array( 'pass', 'rewrite' ) === $quality_schema['properties']['decision']['enum'] && 7 === $quality_schema['properties']['issues']['maxItems'], 'The quality review schema must remain bounded and machine-readable.' );
-pct_assert( array( 'explanation_first', 'missing_context', 'missing_why', 'missing_action', 'weak_cta', 'poor_rhythm', 'emoji_rule' ) === $quality_schema['properties']['issues']['items']['enum'], 'The quality review must expose only actionable conversion issues.' );
+pct_assert( false === $quality_schema['additionalProperties'] && array( 'decision', 'issues' ) === $quality_schema['required'] && array( 'pass', 'rewrite' ) === $quality_schema['properties']['decision']['enum'] && 9 === $quality_schema['properties']['issues']['maxItems'], 'The quality review schema must remain bounded and machine-readable.' );
+pct_assert( array( 'explanation_first', 'missing_context', 'weak_hook', 'missing_why', 'missing_action', 'weak_cta', 'poor_rhythm', 'tone_mismatch', 'emoji_rule' ) === $quality_schema['properties']['issues']['items']['enum'], 'The quality review must expose only actionable conversion issues.' );
 pct_assert( true === personal_cta_threads_validate_quality_review( array( 'decision' => 'pass', 'issues' => array() ) ), 'A passing quality review must have no issues.' );
 pct_assert( true === personal_cta_threads_validate_quality_review( array( 'decision' => 'rewrite', 'issues' => array( 'missing_context' ) ) ), 'A rewrite quality review must accept a missing standalone context issue.' );
+pct_assert( true === personal_cta_threads_validate_quality_review( array( 'decision' => 'rewrite', 'issues' => array( 'weak_hook', 'tone_mismatch' ) ) ), 'A rewrite quality review must accept the measured weak-hook and mixed-tone failures.' );
 $pass_with_issue = personal_cta_threads_validate_quality_review( array( 'decision' => 'pass', 'issues' => array( 'weak_cta' ) ) );
 pct_assert( is_wp_error( $pass_with_issue ) && 'pct_invalid_quality_review' === $pass_with_issue->get_error_code(), 'A pass quality review must reject issues.' );
 $rewrite_without_issue = personal_cta_threads_validate_quality_review( array( 'decision' => 'rewrite', 'issues' => array() ) );
@@ -379,6 +380,22 @@ $contextless_draft_ok  = personal_cta_threads_validate_copy( $contextless_copy, 
 $missing_context_error = personal_cta_threads_validate_copy( $contextless_copy, $missing_context_fact_map, 'H1', true );
 pct_assert( true === $contextless_draft_ok, 'A context-light writer draft must reach the existing quality-and-rewrite path instead of terminating the run.' );
 pct_assert( is_wp_error( $missing_context_error ) && 'pct_missing_context' === $missing_context_error->get_error_code(), 'A copy that drops every standalone-context fact must fail before delivery.' );
+$hookless_copy = $copy;
+$missing_hook_error = personal_cta_threads_validate_copy( $hookless_copy, $missing_context_fact_map, 'H1' );
+pct_assert( is_wp_error( $missing_hook_error ) && 'pct_missing_hook' === $missing_hook_error->get_error_code(), 'A final copy must retain evidence for its selected hook angle.' );
+$soft_hook_copy = array(
+	'text'          => '테스트 글을 읽는 중 첫 문단에 필요한 정보가 궁금해질 수 있습니다. 먼저 확인해.',
+	'hook_angle_id' => 'H1',
+	'fact_ids'      => array( 'F1', 'F2' ),
+	'claims'        => array(
+		array( 'text' => '첫 문단입니다.', 'fact_ids' => array( 'F1' ) ),
+		array( 'text' => '테스트 글', 'fact_ids' => array( 'F2' ) ),
+	),
+);
+pct_assert( array( 'weak_hook' ) === personal_cta_threads_local_quality_issues( $soft_hook_copy ), 'A measured soft-context opener must be routed to the existing rewrite step without another quality call.' );
+$strong_hook_copy = $soft_hook_copy;
+$strong_hook_copy['text'] = '교통사고 후 치료가 더 필요하다면 서류부터 떼지 말고 제출 목적을 확인해.';
+pct_assert( array() === personal_cta_threads_local_quality_issues( $strong_hook_copy ), 'A concrete situation-and-choice opener must not be rejected by the narrow local guard.' );
 $copy_schema = personal_cta_threads_copy_schema();
 pct_assert( 12 === $copy_schema['properties']['fact_ids']['maxItems'] && 8 === $copy_schema['properties']['claims']['maxItems'] && 4 === $copy_schema['properties']['claims']['items']['properties']['fact_ids']['maxItems'], 'Copy metadata must stay bounded so it cannot consume the editor output budget.' );
 $too_many_claims = $copy;
@@ -579,7 +596,7 @@ $restored_context_copy = array(
 personal_cta_threads_set_meta( $metadata_context_post_id, 'fact_map', $missing_context_fact_map );
 personal_cta_threads_set_meta( $metadata_context_post_id, 'fact_cache_key', $metadata_context_fact_key );
 personal_cta_threads_set_meta( $metadata_context_post_id, 'drafts', $metadata_context_drafts );
-personal_cta_threads_set_meta( $metadata_context_post_id, 'editor_result', $contextless_copy );
+personal_cta_threads_set_meta( $metadata_context_post_id, 'editor_result', $soft_hook_copy );
 personal_cta_threads_set_meta( $metadata_context_post_id, 'generation_key', $metadata_context_run_key );
 personal_cta_threads_set_state( $metadata_context_post_id, 'editing', 'editor_complete' );
 $metadata_context_request_count = count( $test_remote_requests );
@@ -592,8 +609,8 @@ $test_remote_response = array(
 	) ),
 );
 $metadata_context_pending = personal_cta_threads_generate( $metadata_context_post_id, false );
-pct_assert( is_array( $metadata_context_pending ) && ! empty( $metadata_context_pending['pending'] ) && 'conversion_repair_complete' === personal_cta_threads_meta( $metadata_context_post_id, 'stage' ) && $metadata_context_request_count + 1 === count( $test_remote_requests ), 'Missing context metadata must use the existing one-call conversion repair without spending a separate quality call.' );
-pct_assert( '' === personal_cta_threads_meta( $metadata_context_post_id, 'quality_response_id' ), 'A deterministic context omission must not spend or record a model quality review.' );
+pct_assert( is_array( $metadata_context_pending ) && ! empty( $metadata_context_pending['pending'] ) && 'conversion_repair_complete' === personal_cta_threads_meta( $metadata_context_post_id, 'stage' ) && $metadata_context_request_count + 1 === count( $test_remote_requests ), 'A measured soft opener must use the existing one-call conversion repair without spending a separate quality call.' );
+pct_assert( array( 'weak_hook' ) === personal_cta_threads_meta( $metadata_context_post_id, 'quality_review' )['issues'] && '' === personal_cta_threads_meta( $metadata_context_post_id, 'quality_response_id' ), 'A deterministic hook omission must route to repair without a model quality review.' );
 
 $editor_recovery_post_id = 9;
 $editor_recovery_source  = personal_cta_threads_source( $editor_recovery_post_id );
