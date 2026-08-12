@@ -1605,6 +1605,11 @@ function personal_cta_threads_generate( $post_id, $regenerate = false ) {
 		return new WP_Error( 'pct_outbound_url_too_long', '게시 링크가 너무 길어 500자 Threads 글을 만들 수 없습니다. 링크 또는 UTM 설정을 줄이거나 링크 포함을 끄세요.' );
 	}
 	$run_key       = hash( 'sha256', $source['hash'] . '|' . $model . '|' . wp_json_encode( $versions ) . '|' . hash( 'sha256', personal_cta_threads_style_examples_text() ) . '|' . $delivery );
+	$fact_key      = hash( 'sha256', $source['hash'] . '|' . $model . '|' . PERSONAL_CTA_THREADS_FACT_PROMPT_VERSION . '|' . PERSONAL_CTA_THREADS_SCHEMA_VERSION );
+	$fact_map      = personal_cta_threads_meta( $post_id, 'fact_map', array() );
+	$fact_ok       = is_array( $fact_map )
+		&& hash_equals( $fact_key, (string) personal_cta_threads_meta( $post_id, 'fact_cache_key' ) )
+		&& true === personal_cta_threads_validate_fact_map( $fact_map, $source['text'] );
 	$saved_key     = (string) personal_cta_threads_meta( $post_id, 'generation_key' );
 	$status        = (string) personal_cta_threads_meta( $post_id, 'status' );
 	$existing_text = (string) personal_cta_threads_meta( $post_id, 'final_text' );
@@ -1615,7 +1620,8 @@ function personal_cta_threads_generate( $post_id, $regenerate = false ) {
 		&& '' !== $saved_key && hash_equals( $run_key, $saved_key )
 		&& hash_equals( hash( 'sha256', $existing_text ), (string) personal_cta_threads_meta( $post_id, 'text_hash' ) )
 		&& is_array( $existing_copy ) && isset( $existing_copy['text'], $existing_copy['fact_ids'] )
-		&& hash_equals( hash( 'sha256', $existing_text ), hash( 'sha256', (string) $existing_copy['text'] ) );
+		&& hash_equals( hash( 'sha256', $existing_text ), hash( 'sha256', (string) $existing_copy['text'] ) )
+		&& $fact_ok;
 	if ( $existing_ok ) {
 		if ( 'blocked' === (string) personal_cta_threads_meta( $post_id, 'verifier_state' ) ) {
 			return new WP_Error( 'pct_verifier_blocked', '독립 사실 검증에서 원문 근거가 부족하거나 왜곡된 문장이 발견됐습니다. 다시 생성하세요.' );
@@ -1644,11 +1650,6 @@ function personal_cta_threads_generate( $post_id, $regenerate = false ) {
 		}
 	}
 
-	$fact_key = hash( 'sha256', $source['hash'] . '|' . $model . '|' . PERSONAL_CTA_THREADS_FACT_PROMPT_VERSION . '|' . PERSONAL_CTA_THREADS_SCHEMA_VERSION );
-	$fact_map = personal_cta_threads_meta( $post_id, 'fact_map', array() );
-	$fact_ok  = is_array( $fact_map )
-		&& hash_equals( $fact_key, (string) personal_cta_threads_meta( $post_id, 'fact_cache_key' ) )
-		&& true === personal_cta_threads_validate_fact_map( $fact_map, $source['text'] );
 	if ( ! $fact_ok ) {
 		personal_cta_threads_set_state( $post_id, 'analyzing', 'fact' );
 		personal_cta_threads_heartbeat( $post_id, 600 );

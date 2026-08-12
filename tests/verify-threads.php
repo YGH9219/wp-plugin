@@ -444,6 +444,35 @@ pct_assert( false === strpos( $diagnostic_json, 'evidence' ) && false === strpos
 $reuse_start = count( $test_remote_requests );
 $reused      = personal_cta_threads_generate( $normal_post_id, false );
 pct_assert( is_array( $reused ) && ! empty( $reused['reused'] ) && $reuse_start === count( $test_remote_requests ), 'A passed verifier result must be reused without another provider call.' );
+
+/* A reusable copy must not bypass recovery from an invalid saved FACT MAP. */
+$invalid_cache_post_id  = 24;
+$invalid_cache_source   = personal_cta_threads_source( $invalid_cache_post_id );
+$invalid_cache_text     = $normal_editor['text'];
+$invalid_cache_settings = personal_cta_threads_settings();
+$invalid_cache_delivery = ! empty( $invalid_cache_settings['include_link'] ) ? personal_cta_threads_outbound_url( $invalid_cache_post_id ) : '';
+$invalid_cache_run_key  = hash( 'sha256', $invalid_cache_source['hash'] . '|' . personal_cta_threads_openai_model() . '|' . wp_json_encode( personal_cta_threads_prompt_versions() ) . '|' . hash( 'sha256', personal_cta_threads_style_examples_text() ) . '|' . $invalid_cache_delivery );
+$invalid_cache_fact_key = hash( 'sha256', $invalid_cache_source['hash'] . '|' . personal_cta_threads_openai_model() . '|' . PERSONAL_CTA_THREADS_FACT_PROMPT_VERSION . '|' . PERSONAL_CTA_THREADS_SCHEMA_VERSION );
+$legacy_fact_map = $fact_map;
+$legacy_fact_map['reader_problem']    = $legacy_fact_map['reader_situation'];
+$legacy_fact_map['facts'][0]['claim'] = $legacy_fact_map['facts'][0]['statement'];
+unset( $legacy_fact_map['reader_situation'], $legacy_fact_map['facts'][0]['subject'], $legacy_fact_map['facts'][0]['statement'] );
+personal_cta_threads_set_meta( $invalid_cache_post_id, 'generation_key', $invalid_cache_run_key );
+personal_cta_threads_set_meta( $invalid_cache_post_id, 'fact_cache_key', $invalid_cache_fact_key );
+personal_cta_threads_set_meta( $invalid_cache_post_id, 'source_hash', $invalid_cache_source['hash'] );
+personal_cta_threads_set_meta( $invalid_cache_post_id, 'text_hash', hash( 'sha256', $invalid_cache_text ) );
+personal_cta_threads_set_meta( $invalid_cache_post_id, 'final_text', $invalid_cache_text );
+personal_cta_threads_set_meta( $invalid_cache_post_id, 'final_copy', $normal_editor );
+personal_cta_threads_set_meta( $invalid_cache_post_id, 'fact_map', $legacy_fact_map );
+personal_cta_threads_set_meta( $invalid_cache_post_id, 'verifier_state', 'failed' );
+personal_cta_threads_set_state( $invalid_cache_post_id, 'failed', 'verifier' );
+$test_remote_responses = array( pct_openai_response( 'resp_' . $invalid_cache_post_id . '_fact', $fact_map ) );
+$invalid_cache_start   = count( $test_remote_requests );
+$invalid_cache_result  = personal_cta_threads_generate( $invalid_cache_post_id, false );
+$invalid_cache_requests = array_slice( $test_remote_requests, $invalid_cache_start );
+$invalid_cache_payload = isset( $invalid_cache_requests[0]['args']['body'] ) ? json_decode( $invalid_cache_requests[0]['args']['body'], true ) : array();
+pct_assert( is_array( $invalid_cache_result ) && ! empty( $invalid_cache_result['pending'] ) && 1 === count( $invalid_cache_requests ) && 'threads_fact' === $invalid_cache_payload['text']['format']['name'], 'An invalid saved FACT MAP must restart FACT extraction instead of failing again at the verifier.' );
+
 $test_post_title = '변경된 테스트 글';
 $stale_state     = personal_cta_threads_admin_state( $normal_post_id );
 pct_assert( 'failed' === $stale_state['status'] && '' === $stale_state['copy_text'] && 'not_run' === personal_cta_threads_meta( $normal_post_id, 'verifier_state' ), 'A source edit must immediately hide an older ready copy.' );
