@@ -114,6 +114,10 @@
 		const [ busy, setBusy ] = useState( false );
 		const [ error, setError ] = useState( '' );
 		const [ message, setMessage ] = useState( '' );
+		const [ diagnosticOpen, setDiagnosticOpen ] = useState( false );
+		const [ diagnostic, setDiagnostic ] = useState( null );
+		const [ diagnosticBusy, setDiagnosticBusy ] = useState( false );
+		const [ diagnosticError, setDiagnosticError ] = useState( '' );
 
 		function loadState() {
 			if ( ! postId ) {
@@ -128,9 +132,27 @@
 			} );
 		}
 
+		function loadDiagnostics() {
+			if ( ! postId ) {
+				return Promise.resolve();
+			}
+
+			setDiagnosticBusy( true );
+			setDiagnosticError( '' );
+			return request( postId, '/diagnostics', 'GET' ).then( function ( nextDiagnostic ) {
+				setDiagnostic( nextDiagnostic );
+			} ).catch( function ( requestError ) {
+				setDiagnosticError( requestError.message );
+			} ).finally( function () {
+				setDiagnosticBusy( false );
+			} );
+		}
+
 		useEffect( function () {
 			setError( '' );
 			setMessage( '' );
+			setDiagnostic( null );
+			setDiagnosticError( '' );
 			loadState();
 		}, [ postId ] );
 
@@ -146,8 +168,27 @@
 			};
 		}, [ postId, state.poll ] );
 
+		useEffect( function () {
+			if ( ! postId || ! diagnosticOpen ) {
+				return undefined;
+			}
+
+			loadDiagnostics();
+			if ( ! state.poll ) {
+				return undefined;
+			}
+
+			const timer = window.setInterval( loadDiagnostics, Number( config.pollMs ) || 2500 );
+
+			return function () {
+				window.clearInterval( timer );
+			};
+		}, [ postId, diagnosticOpen, state.poll ] );
+
 		function generate( regenerate ) {
 			setError( '' );
+			setDiagnostic( null );
+			setDiagnosticError( '' );
 			setMessage( regenerate ? '새 문구를 요청하는 중…' : 'AI 문구를 요청하는 중…' );
 			setBusy( true );
 
@@ -205,6 +246,22 @@
 			: ( message || labels[ state.status ] || ( '상태: ' + state.status ) );
 		const displayedError = error || ( 'failed' === state.status ? state.last_error : '' );
 		const disabled = ! postId || ! published || busy || working;
+		const diagnosticDrafts = diagnostic && Array.isArray( diagnostic.drafts ) ? diagnostic.drafts : [];
+		const diagnosticEntries = diagnosticDrafts.map( function ( draft ) {
+			return {
+				label: 'Writer 초안 ' + draft.id + ( draft.hook_angle_id ? ' (' + draft.hook_angle_id + ')' : '' ),
+				copy: draft,
+			};
+		} );
+		if ( diagnostic && diagnostic.editor ) {
+			diagnosticEntries.push( { label: 'Chief Editor 결과' + ( diagnostic.editor.hook_angle_id ? ' (' + diagnostic.editor.hook_angle_id + ')' : '' ), copy: diagnostic.editor } );
+		}
+		if ( diagnostic && diagnostic.repair ) {
+			diagnosticEntries.push( { label: '최종 보정 결과', copy: diagnostic.repair } );
+		}
+		if ( diagnostic && diagnostic.final ) {
+			diagnosticEntries.push( { label: '최종 생성 문구 (보정 후)', copy: diagnostic.final } );
+		}
 
 		return createElement(
 			PluginSidebar,
@@ -244,6 +301,30 @@
 					createElement( Button, { variant: 'secondary', onClick: function () { generate( true ); }, disabled: disabled }, '다시 생성' ),
 					createElement( Button, { variant: 'secondary', onClick: copy, disabled: busy || ! copyText }, '복사' )
 				)
+			),
+			createElement(
+				PanelBody,
+				{
+					title: '생성 단계 진단 (관리자 전용)',
+					initialOpen: false,
+					onToggle: function ( nextOpen ) {
+						setDiagnosticOpen( nextOpen );
+					},
+				},
+				createElement( 'p', { className: 'pct-threads-editor-progress' }, 'Writer 초안과 편집장 결과를 비교합니다. 원문과 API 정보는 표시하지 않습니다.' ),
+				diagnosticOpen && createElement( Button, { variant: 'secondary', onClick: loadDiagnostics, disabled: diagnosticBusy }, '진단 새로고침' ),
+				diagnosticBusy && createElement( Spinner, null ),
+				diagnosticError && createElement( Notice, { status: 'error', isDismissible: false }, diagnosticError ),
+				diagnosticOpen && diagnostic && ! diagnosticEntries.length && createElement( Notice, { status: 'info', isDismissible: false }, '아직 저장된 생성 단계가 없습니다.' ),
+				diagnosticOpen && diagnosticEntries.map( function ( entry ) {
+					return createElement( TextareaControl, {
+						key: entry.label,
+						label: entry.label,
+						value: entry.copy.text || '',
+						rows: 8,
+						readOnly: true,
+					} );
+				} )
 			)
 		);
 	}

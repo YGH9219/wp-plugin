@@ -699,6 +699,7 @@ function personal_cta_threads_run_job( $post_id ) {
  */
 function personal_cta_threads_resume( $post_id ) {
 	$status      = (string) personal_cta_threads_meta( $post_id, 'status', 'idle' );
+	$stage       = (string) personal_cta_threads_meta( $post_id, 'stage', 'queued' );
 	$lease_until = (int) personal_cta_threads_meta( $post_id, 'lease_until', 0 );
 	if ( ! personal_cta_threads_is_working( $status ) ) {
 		return new WP_Error( 'pct_not_pending', '다시 예약할 Threads 작업이 없습니다.' );
@@ -707,7 +708,7 @@ function personal_cta_threads_resume( $post_id ) {
 		return new WP_Error( 'pct_busy', 'Threads 작업이 아직 진행 중입니다.' );
 	}
 
-	personal_cta_threads_set_state( $post_id, $status, 'queued' );
+	personal_cta_threads_set_state( $post_id, $status, '' !== $stage ? $stage : 'queued' );
 	personal_cta_threads_heartbeat( $post_id, 600 );
 	$result = personal_cta_threads_continue_job( $post_id, 0 );
 	if ( is_wp_error( $result ) ) {

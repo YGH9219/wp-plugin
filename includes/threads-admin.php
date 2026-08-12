@@ -200,6 +200,12 @@ function personal_cta_threads_register_rest_routes() {
 		'permission_callback' => 'personal_cta_threads_rest_permission',
 		'args'                => $id,
 	) );
+	register_rest_route( 'personal-cta/v1', $base . '/diagnostics', array(
+		'methods'             => 'GET',
+		'callback'            => 'personal_cta_threads_rest_diagnostics',
+		'permission_callback' => 'personal_cta_threads_rest_permission',
+		'args'                => $id,
+	) );
 	register_rest_route( 'personal-cta/v1', $base . '/generate', array(
 		'methods'             => 'POST',
 		'callback'            => 'personal_cta_threads_rest_generate',
@@ -274,6 +280,68 @@ function personal_cta_threads_admin_state( $post_id ) {
  */
 function personal_cta_threads_rest_state( $request ) {
 	return new WP_REST_Response( personal_cta_threads_admin_state( absint( $request['id'] ) ), 200 );
+}
+
+/**
+ * Reduces a stored model response to the safe fields needed for admin diagnostics.
+ *
+ * @param mixed $copy Stored model response.
+ * @return array<string, string>|null
+ */
+function personal_cta_threads_diagnostic_copy( $copy ) {
+	$text = is_array( $copy ) && isset( $copy['text'] ) && is_string( $copy['text'] ) ? trim( $copy['text'] ) : '';
+	if ( '' === $text ) {
+		return null;
+	}
+
+	return array(
+		'text'          => $text,
+		'hook_angle_id' => is_array( $copy ) && isset( $copy['hook_angle_id'] ) && is_string( $copy['hook_angle_id'] ) ? $copy['hook_angle_id'] : '',
+	);
+}
+
+/**
+ * Returns saved writer/editor checkpoints without exposing source or API data.
+ *
+ * @param int $post_id Post ID.
+ * @return array<string, mixed>
+ */
+function personal_cta_threads_admin_diagnostics( $post_id ) {
+	$state  = personal_cta_threads_state( $post_id );
+	$stored = personal_cta_threads_meta( $post_id, 'drafts', array() );
+	$drafts = array();
+	foreach ( array( 'H1', 'H2', 'H3' ) as $id ) {
+		$draft = is_array( $stored ) && isset( $stored[ $id ] ) ? personal_cta_threads_diagnostic_copy( $stored[ $id ] ) : null;
+		if ( is_array( $draft ) ) {
+			$draft['id'] = $id;
+			$drafts[]    = $draft;
+		}
+	}
+
+	$final = null;
+	if ( 'ready' === $state['status'] ) {
+		$text = trim( (string) personal_cta_threads_meta( $post_id, 'final_text', '' ) );
+		$final = '' === $text ? null : array( 'text' => $text );
+	}
+
+	return array(
+		'status' => $state['status'],
+		'stage'  => $state['stage'],
+		'drafts' => $drafts,
+		'editor' => personal_cta_threads_diagnostic_copy( personal_cta_threads_meta( $post_id, 'editor_result', array() ) ),
+		'repair' => personal_cta_threads_diagnostic_copy( personal_cta_threads_meta( $post_id, 'repair_result', array() ) ),
+		'final'  => $final,
+	);
+}
+
+/**
+ * Returns the administrator-only generation checkpoints.
+ *
+ * @param WP_REST_Request $request Request.
+ * @return WP_REST_Response
+ */
+function personal_cta_threads_rest_diagnostics( $request ) {
+	return new WP_REST_Response( personal_cta_threads_admin_diagnostics( absint( $request['id'] ) ), 200 );
 }
 
 /**

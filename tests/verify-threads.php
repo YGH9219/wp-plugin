@@ -113,6 +113,7 @@ function wp_remote_retrieve_response_code( $response ) { return isset( $response
 
 require dirname( __DIR__ ) . '/includes/threads-core.php';
 require dirname( __DIR__ ) . '/includes/threads-openai.php';
+require dirname( __DIR__ ) . '/includes/threads-admin.php';
 
 function pct_assert( $condition, $message ) {
 	if ( ! $condition ) {
@@ -198,6 +199,13 @@ $fact_map = array(
 			'must_preserve' => array( '첫 문단' ),
 		),
 	),
+	'reader_stakes'     => array( array( 'text' => '무엇을 먼저 확인할지 판단해야 한다.', 'fact_ids' => array( 'F1' ) ) ),
+	'common_mistakes'   => array(),
+	'why_it_matters'    => array( array( 'text' => '첫 문단 확인이 핵심이다.', 'fact_ids' => array( 'F1' ) ) ),
+	'unexpected_points' => array(),
+	'actionable_payoffs' => array( array( 'text' => '첫 문단을 확인하는 행동이 가능하다.', 'fact_ids' => array( 'F1' ) ) ),
+	'curiosity_gaps'    => array(),
+	'weak_points_for_copy' => array( array( 'text' => '제목만 반복하지 않는다.', 'fact_ids' => array( 'F1' ) ) ),
 	'hook_angles'      => array(
 		array( 'id' => 'H1', 'type' => 'convenience', 'premise' => '첫째', 'fact_ids' => array( 'F1' ) ),
 		array( 'id' => 'H2', 'type' => 'warning', 'premise' => '둘째', 'fact_ids' => array( 'F1' ) ),
@@ -206,6 +214,25 @@ $fact_map = array(
 	'blockers'         => array(),
 );
 pct_assert( true === personal_cta_threads_validate_fact_map( $fact_map, $source['text'] ), 'Literal FACT evidence must validate against its source segment.' );
+$fact_schema = personal_cta_threads_fact_schema();
+foreach ( personal_cta_threads_content_value_keys() as $value_key ) {
+	pct_assert( in_array( $value_key, $fact_schema['required'], true ) && isset( $fact_schema['properties'][ $value_key ] ), 'Every grounded content-value field must be required by the FACT schema.' );
+}
+$unknown_value_fact_map = $fact_map;
+$unknown_value_fact_map['why_it_matters'][0]['fact_ids'] = array( 'F999' );
+pct_assert( is_wp_error( personal_cta_threads_validate_fact_map( $unknown_value_fact_map, $source['text'] ) ), 'Content-value hints may only cite known FACT IDs.' );
+$missing_value_fact_map = $fact_map;
+unset( $missing_value_fact_map['reader_stakes'] );
+pct_assert( is_wp_error( personal_cta_threads_validate_fact_map( $missing_value_fact_map, $source['text'] ) ), 'All content-value fields must be present even when empty.' );
+$empty_value_fact_map = $fact_map;
+foreach ( personal_cta_threads_content_value_keys() as $value_key ) {
+	$empty_value_fact_map[ $value_key ] = array();
+}
+pct_assert( true === personal_cta_threads_validate_fact_map( $empty_value_fact_map, $source['text'] ), 'Empty content-value fields must remain valid when the source offers no safe editorial hint.' );
+$blocked_invalid_value_fact_map = $fact_map;
+$blocked_invalid_value_fact_map['blockers'] = array( '원문이 모순됩니다.' );
+unset( $blocked_invalid_value_fact_map['reader_stakes'] );
+pct_assert( is_wp_error( personal_cta_threads_validate_fact_map( $blocked_invalid_value_fact_map, $source['text'] ) ), 'Blockers may not bypass content-value validation.' );
 
 $copy = array(
 	'text'          => "첫 문단입니다.\n확인해봐.",
@@ -257,11 +284,34 @@ $missing_check = $verification;
 array_pop( $missing_check['checks'] );
 pct_assert( is_wp_error( personal_cta_threads_validate_verifier( $missing_check, $fact_map, $source['text'], $units, array( 'F1' ) ) ), 'A verifier may not omit a candidate line.' );
 
+personal_cta_threads_set_meta( 7, 'drafts', array( 'H1' => $copy, 'H2' => $copy, 'H3' => $copy ) );
+personal_cta_threads_set_meta( 7, 'editor_result', $copy );
+personal_cta_threads_set_meta( 7, 'repair_result', $copy );
+personal_cta_threads_set_meta( 7, 'final_text', $copy['text'] );
+personal_cta_threads_set_state( 7, 'ready', 'ready' );
+$diagnostics = personal_cta_threads_admin_diagnostics( 7 );
+pct_assert( 3 === count( $diagnostics['drafts'] ) && 'H1' === $diagnostics['drafts'][0]['id'], 'Diagnostics must preserve the writer checkpoint order.' );
+pct_assert( $copy['text'] === $diagnostics['editor']['text'] && $copy['text'] === $diagnostics['repair']['text'] && $copy['text'] === $diagnostics['final']['text'], 'Diagnostics must expose only the saved copy checkpoints.' );
+pct_assert( false === strpos( wp_json_encode( $diagnostics ), 'fact_ids' ), 'Diagnostics must not expose FACT evidence or model metadata.' );
+
+$current_run_key = hash( 'sha256', $source['hash'] . '|' . personal_cta_threads_openai_model() . '|' . wp_json_encode( personal_cta_threads_prompt_versions() ) . '|' . hash( 'sha256', personal_cta_threads_style_examples_text() ) );
+personal_cta_threads_set_meta( 7, 'source_hash', $source['hash'] );
+personal_cta_threads_set_meta( 7, 'generation_key', $current_run_key );
+personal_cta_threads_set_state( 7, 'queued', 'queued' );
+$reused_copy = personal_cta_threads_generate( 7, false );
+pct_assert( is_array( $reused_copy ) && ! empty( $reused_copy['reused'] ) && 'ready' === personal_cta_threads_meta( 7, 'status' ), 'A matching completed generation must restore ready state without calling the model.' );
+personal_cta_threads_set_meta( 7, 'generation_key', 'outdated-generation-key' );
+personal_cta_threads_set_state( 7, 'queued', 'queued' );
+$outdated_copy = personal_cta_threads_generate( 7, false );
+pct_assert( ! is_array( $outdated_copy ) || empty( $outdated_copy['reused'] ), 'A prompt-version change must not reuse an older completed generation.' );
+
 $queued = personal_cta_threads_queue( 7, false );
 pct_assert( true === $queued, 'A copy-generation request must queue successfully.' );
 pct_assert( 'queued' === personal_cta_threads_meta( 7, 'status' ), 'A copy-generation request must never publish the post.' );
 pct_assert( (int) personal_cta_threads_meta( 7, 'last_heartbeat', 0 ) > 0 && (int) personal_cta_threads_meta( 7, 'lease_until', 0 ) > time(), 'A queued job must be recoverable by the watchdog.' );
+personal_cta_threads_set_state( 7, 'drafting', 'writer_h2_complete' );
 delete_post_meta( 7, '_pct_threads_lease_until' );
 pct_assert( true === personal_cta_threads_resume( 7 ), 'A stalled job must be requeued without discarding its checkpoints.' );
+pct_assert( 'drafting' === personal_cta_threads_meta( 7, 'status' ) && 'writer_h2_complete' === personal_cta_threads_meta( 7, 'stage' ), 'Resuming must preserve the generation checkpoint state.' );
 
 echo "Threads copy-generation safeguards are valid.\n";
