@@ -311,7 +311,26 @@ $fact_map = array(
 $fact_schema = personal_cta_threads_fact_schema();
 pct_assert( array( 'topic', 'reader_situation', 'context_fact_ids', 'facts', 'blockers' ) === $fact_schema['required'], 'FACT schema must contain only atomic extraction fields.' );
 pct_assert( ! isset( $fact_schema['properties']['reader_problem'], $fact_schema['properties']['hook_angles'] ) && 12 === $fact_schema['properties']['facts']['maxItems'] && 1 === $fact_schema['properties']['facts']['items']['properties']['evidence']['maxItems'], 'FACT schema must not mix strategy with extraction.' );
+pct_assert( '^F([1-9]|1[0-2])$' === $fact_schema['properties']['facts']['items']['properties']['id']['pattern'] && '\\S' === $fact_schema['properties']['facts']['items']['properties']['subject']['pattern'], 'FACT schema must prevent blank facts and constrain generated IDs.' );
 pct_assert( true === personal_cta_threads_validate_fact_map( $fact_map, $source['text'] ), 'A grounded atomic FACT MAP must validate.' );
+$noncanonical_fact_map                    = $fact_map;
+$noncanonical_fact_map['facts'][0]['id'] = 'primary-fact';
+$noncanonical_fact_map['facts'][]        = array(
+	'id'            => 'secondary-fact',
+	'subject'       => '첫 문단',
+	'statement'     => '첫 문단입니다.',
+	'evidence'      => array( array( 'source_id' => 'S002', 'quote' => '첫 문단입니다.' ) ),
+	'must_preserve' => array(),
+);
+$noncanonical_fact_map['context_fact_ids'] = array( 'secondary-fact', 'primary-fact' );
+$normalized_fact_map = personal_cta_threads_normalize_fact_ids( $noncanonical_fact_map );
+pct_assert( is_array( $normalized_fact_map ) && array( 'F1', 'F2' ) === array_column( $normalized_fact_map['facts'], 'id' ) && array( 'F2', 'F1' ) === $normalized_fact_map['context_fact_ids'] && true === personal_cta_threads_validate_fact_map( $normalized_fact_map, $source['text'] ), 'Noncanonical model FACT IDs must be normalized by order with context references remapped.' );
+$duplicate_fact_map = $noncanonical_fact_map;
+$duplicate_fact_map['facts'][1]['id'] = 'primary-fact';
+pct_assert( is_wp_error( personal_cta_threads_normalize_fact_ids( $duplicate_fact_map ) ), 'Duplicate model FACT IDs must be rejected.' );
+$unknown_context_fact_map = $noncanonical_fact_map;
+$unknown_context_fact_map['context_fact_ids'] = array( 'missing-fact' );
+pct_assert( is_wp_error( personal_cta_threads_normalize_fact_ids( $unknown_context_fact_map ) ), 'Unknown model FACT context references must be rejected.' );
 $bad_fact_map = $fact_map;
 $bad_fact_map['context_fact_ids'] = array( 'F999' );
 pct_assert( is_wp_error( personal_cta_threads_validate_fact_map( $bad_fact_map, $source['text'] ) ), 'FACT context may cite only known facts.' );
