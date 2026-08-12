@@ -7,12 +7,12 @@ defined( 'ABSPATH' ) || exit;
 
 define( 'PERSONAL_CTA_THREADS_FACT_PROMPT_VERSION', '4.3' );
 define( 'PERSONAL_CTA_THREADS_WRITER_PROMPT_VERSION', '8.2' );
-define( 'PERSONAL_CTA_THREADS_EDITOR_PROMPT_VERSION', '5.2' );
+define( 'PERSONAL_CTA_THREADS_EDITOR_PROMPT_VERSION', '5.3' );
 define( 'PERSONAL_CTA_THREADS_QUALITY_PROMPT_VERSION', '1.0' );
 define( 'PERSONAL_CTA_THREADS_CONVERSION_REPAIR_PROMPT_VERSION', '1.0' );
 define( 'PERSONAL_CTA_THREADS_VERIFIER_PROMPT_VERSION', '2.0' );
 define( 'PERSONAL_CTA_THREADS_REPAIR_PROMPT_VERSION', '1.3' );
-define( 'PERSONAL_CTA_THREADS_SCHEMA_VERSION', '2.1' );
+define( 'PERSONAL_CTA_THREADS_SCHEMA_VERSION', '2.2' );
 
 /**
  * Returns a configured OpenAI API key, preferring wp-config or the environment.
@@ -70,20 +70,51 @@ function personal_cta_threads_openai_prompt_version( $stage ) {
 }
 
 /**
+ * Returns the bounded Responses API budget appropriate for one pipeline stage.
+ *
+ * max_output_tokens also covers reasoning tokens. Writing stages therefore use
+ * medium effort, while the single editor recovery trades extra room for low
+ * effort so a truncated first edit cannot restart the whole run.
+ *
+ * @param string $stage Request stage.
+ * @param bool   $recovery Whether this is the one permitted editor recovery.
+ * @return array{max_output_tokens:int,reasoning_effort:string}
+ */
+function personal_cta_threads_openai_stage_options( $stage, $recovery = false ) {
+	$options = array(
+		'fact'              => array( 'max_output_tokens' => 8192, 'reasoning_effort' => 'high' ),
+		'writer'            => array( 'max_output_tokens' => 4096, 'reasoning_effort' => 'medium' ),
+		'editor'            => array( 'max_output_tokens' => 6144, 'reasoning_effort' => 'medium' ),
+		'quality'           => array( 'max_output_tokens' => 2048, 'reasoning_effort' => 'medium' ),
+		'conversion_repair' => array( 'max_output_tokens' => 4096, 'reasoning_effort' => 'medium' ),
+		'repair'            => array( 'max_output_tokens' => 4096, 'reasoning_effort' => 'medium' ),
+		'verifier'          => array( 'max_output_tokens' => 4096, 'reasoning_effort' => 'medium' ),
+	);
+
+	if ( $recovery && 'editor' === $stage ) {
+		return array( 'max_output_tokens' => 8192, 'reasoning_effort' => 'low' );
+	}
+
+	return isset( $options[ $stage ] ) ? $options[ $stage ] : array( 'max_output_tokens' => 4096, 'reasoning_effort' => 'medium' );
+}
+
+/**
  * Extracts non-sensitive usage data from a Responses API payload.
  *
  * @param array<string, mixed> $decoded Decoded response.
  * @return array<string, int>
  */
 function personal_cta_threads_openai_usage( $decoded ) {
-	$usage   = isset( $decoded['usage'] ) && is_array( $decoded['usage'] ) ? $decoded['usage'] : array();
-	$details = isset( $usage['input_tokens_details'] ) && is_array( $usage['input_tokens_details'] ) ? $usage['input_tokens_details'] : array();
+	$usage          = isset( $decoded['usage'] ) && is_array( $decoded['usage'] ) ? $decoded['usage'] : array();
+	$input_details  = isset( $usage['input_tokens_details'] ) && is_array( $usage['input_tokens_details'] ) ? $usage['input_tokens_details'] : array();
+	$output_details = isset( $usage['output_tokens_details'] ) && is_array( $usage['output_tokens_details'] ) ? $usage['output_tokens_details'] : array();
 
 	return array(
-		'input_tokens'  => isset( $usage['input_tokens'] ) ? (int) $usage['input_tokens'] : 0,
-		'cached_tokens' => isset( $details['cached_tokens'] ) ? (int) $details['cached_tokens'] : 0,
-		'output_tokens' => isset( $usage['output_tokens'] ) ? (int) $usage['output_tokens'] : 0,
-		'total_tokens'  => isset( $usage['total_tokens'] ) ? (int) $usage['total_tokens'] : 0,
+		'input_tokens'     => isset( $usage['input_tokens'] ) ? (int) $usage['input_tokens'] : 0,
+		'cached_tokens'    => isset( $input_details['cached_tokens'] ) ? (int) $input_details['cached_tokens'] : 0,
+		'output_tokens'    => isset( $usage['output_tokens'] ) ? (int) $usage['output_tokens'] : 0,
+		'reasoning_tokens' => isset( $output_details['reasoning_tokens'] ) ? (int) $output_details['reasoning_tokens'] : 0,
+		'total_tokens'     => isset( $usage['total_tokens'] ) ? (int) $usage['total_tokens'] : 0,
 	);
 }
 
@@ -96,7 +127,7 @@ function personal_cta_threads_openai_usage( $decoded ) {
  * @param int                         $http_status HTTP status.
  * @return array<string, mixed>|WP_Error
  */
-function personal_cta_threads_openai_parse_response( $body, $http_status = 200 ) {
+function personal_cta_threads_openai_parse_response_legacy( $body, $http_status = 200 ) {
 	$decoded = is_array( $body ) ? $body : json_decode( (string) $body, true );
 	if ( ! is_array( $decoded ) ) {
 		return new WP_Error( 'pct_openai_invalid_response', 'OpenAI 응답을 해석하지 못했습니다.' );
@@ -123,7 +154,7 @@ function personal_cta_threads_openai_parse_response( $body, $http_status = 200 )
 		$message = 'max_output_tokens' === $reason
 			? 'OpenAI 응답이 출력 한도에 도달했습니다. 다시 생성하세요.'
 			: 'OpenAI 응답이 완료되지 않았습니다. 사유: ' . $reason;
-		return new WP_Error( 'pct_openai_incomplete', $message );
+		return new WP_Error( 'pct_openai_incomplete', $message, array( 'reason' => $reason ) );
 	}
 	if ( 'completed' !== $status ) {
 		$error_code = isset( $decoded['error']['code'] ) && is_scalar( $decoded['error']['code'] ) ? sanitize_key( (string) $decoded['error']['code'] ) : '';
@@ -170,16 +201,123 @@ function personal_cta_threads_openai_parse_response( $body, $http_status = 200 )
 }
 
 /**
+ * Classifies an API response without losing an HTTP error behind a proxy HTML
+ * page or an otherwise non-JSON error body.
+ *
+ * @param string|array<string, mixed> $body Response body or decoded payload.
+ * @param int                         $http_status HTTP status.
+ * @return array<string, mixed>|WP_Error
+ */
+function personal_cta_threads_openai_parse_response( $body, $http_status = 200 ) {
+	$decoded = is_array( $body ) ? $body : json_decode( (string) $body, true );
+
+	if ( $http_status < 200 || $http_status >= 300 ) {
+		$remote_code = '';
+		if ( is_array( $decoded ) && isset( $decoded['error']['code'] ) && is_scalar( $decoded['error']['code'] ) ) {
+			$remote_code = sanitize_key( (string) $decoded['error']['code'] );
+		} elseif ( is_array( $decoded ) && isset( $decoded['error']['type'] ) && is_scalar( $decoded['error']['type'] ) ) {
+			$remote_code = sanitize_key( (string) $decoded['error']['type'] );
+		}
+
+		$is_quota     = in_array( $remote_code, array( 'insufficient_quota', 'billing_hard_limit_reached' ), true );
+		$is_retryable = 408 === (int) $http_status || ( 429 === (int) $http_status && ! $is_quota ) || (int) $http_status >= 500 || 0 === (int) $http_status;
+		$message      = 429 === (int) $http_status
+			? ( $is_quota ? 'OpenAI 사용 한도 또는 결제 상태를 확인하세요.' : 'OpenAI 요청 한도에 도달했습니다. 잠시 뒤 다시 시도하세요.' )
+			: ( in_array( (int) $http_status, array( 401, 403 ), true )
+				? 'OpenAI API 키 또는 권한을 확인하세요.'
+				: sprintf( 'OpenAI 요청이 실패했습니다. HTTP %d%s', (int) $http_status, $remote_code ? ' / ' . $remote_code : '' ) );
+
+		return new WP_Error(
+			'pct_openai_http_' . (int) $http_status,
+			$message,
+			array(
+				'class'       => $is_quota ? 'quota' : ( $is_retryable ? 'transport' : 'request' ),
+				'retryable'   => $is_retryable,
+				'http_status' => (int) $http_status,
+				'remote_code' => $remote_code,
+			)
+		);
+	}
+
+	$result = personal_cta_threads_openai_parse_response_legacy( $body, $http_status );
+	if ( ! is_wp_error( $result ) ) {
+		return $result;
+	}
+
+	$code = $result->get_error_code();
+	if ( 'pct_openai_incomplete' === $code ) {
+		$reason = is_array( $decoded ) && isset( $decoded['incomplete_details']['reason'] ) ? sanitize_key( (string) $decoded['incomplete_details']['reason'] ) : 'unknown';
+		if ( in_array( $reason, array( 'max_output_tokens', 'max_tokens' ), true ) ) {
+			return new WP_Error( $code, 'OpenAI 응답이 출력 한도에 도달했습니다.', array( 'class' => 'incomplete', 'retryable' => false, 'reason' => $reason ) );
+		}
+		if ( 'content_filter' === $reason ) {
+			return new WP_Error( $code, 'OpenAI 안전 필터로 응답이 중단됐습니다. 원문의 민감한 표현을 확인한 뒤 다시 생성하세요.', array( 'class' => 'incomplete', 'retryable' => false, 'reason' => $reason ) );
+		}
+
+		return new WP_Error( $code, $result->get_error_message(), array( 'class' => 'incomplete', 'retryable' => false, 'reason' => $reason ) );
+	}
+
+	if ( 'pct_openai_failed' === $code ) {
+		$remote_code = is_array( $decoded ) && isset( $decoded['error']['code'] ) && is_scalar( $decoded['error']['code'] ) ? sanitize_key( (string) $decoded['error']['code'] ) : ( is_array( $decoded ) && isset( $decoded['error']['type'] ) && is_scalar( $decoded['error']['type'] ) ? sanitize_key( (string) $decoded['error']['type'] ) : '' );
+		$retryable   = in_array( $remote_code, array( 'server_error', 'internal_error', 'internal_server_error' ), true );
+
+		return new WP_Error( $code, $result->get_error_message(), array( 'class' => $retryable ? 'transport' : 'response', 'retryable' => $retryable, 'remote_code' => $remote_code ) );
+	}
+
+	return new WP_Error( $code, $result->get_error_message(), array( 'class' => 'protocol', 'retryable' => false ) );
+}
+
+/**
+ * Identifies the only incomplete response that can use the editor recovery.
+ *
+ * @param mixed $result Request result.
+ * @return bool
+ */
+function personal_cta_threads_openai_is_output_limit_error( $result ) {
+	if ( ! is_wp_error( $result ) || 'pct_openai_incomplete' !== $result->get_error_code() ) {
+		return false;
+	}
+
+	$data = $result->get_error_data();
+
+	return is_array( $data ) && in_array( isset( $data['reason'] ) ? $data['reason'] : '', array( 'max_output_tokens', 'max_tokens' ), true );
+}
+
+/**
+ * Returns the one safe delay for a retryable transport failure.
+ *
+ * @param mixed $result Request result.
+ * @return int Delay in seconds, or zero when the error is final.
+ */
+function personal_cta_threads_openai_retry_delay( $result ) {
+	if ( ! is_wp_error( $result ) ) {
+		return 0;
+	}
+
+	if ( 'pct_openai_network' === $result->get_error_code() ) {
+		return 30;
+	}
+
+	$data = $result->get_error_data();
+	if ( ! is_array( $data ) || empty( $data['retryable'] ) ) {
+		return 0;
+	}
+
+	return 429 === ( isset( $data['http_status'] ) ? (int) $data['http_status'] : 0 ) ? 60 : 30;
+}
+
+/**
  * Makes one strict Structured Outputs request.
  *
  * @param string               $stage Request stage.
  * @param string               $developer_prompt Stable developer instructions.
  * @param array<string, mixed> $context Dynamic request data.
  * @param array<string, mixed> $schema JSON Schema.
- * @param int                  $max_output_tokens Output and reasoning budget.
+ * @param int                  $max_output_tokens Optional output and reasoning budget override.
+ * @param bool                 $recovery Whether this is the bounded editor recovery.
  * @return array<string, mixed>|WP_Error
  */
-function personal_cta_threads_openai_request( $stage, $developer_prompt, $context, $schema, $max_output_tokens = 4096 ) {
+function personal_cta_threads_openai_request( $stage, $developer_prompt, $context, $schema, $max_output_tokens = 0, $recovery = false ) {
 	$key = personal_cta_threads_openai_key();
 	if ( is_wp_error( $key ) ) {
 		return $key;
@@ -193,7 +331,9 @@ function personal_cta_threads_openai_request( $stage, $developer_prompt, $contex
 	$version          = personal_cta_threads_openai_prompt_version( $stage );
 	$schema_name      = 'threads_' . $stage;
 	$cache_key        = 'pct-' . $stage . '-' . $version . '-' . substr( hash( 'sha256', $model . '|' . $developer_prompt ), 0, 20 );
-	$reasoning_effort = 'quality' === $stage ? 'medium' : 'high';
+	$stage_options    = personal_cta_threads_openai_stage_options( $stage, (bool) $recovery );
+	$reasoning_effort = $stage_options['reasoning_effort'];
+	$max_output_tokens = 0 < (int) $max_output_tokens ? (int) $max_output_tokens : $stage_options['max_output_tokens'];
 	$context_json = wp_json_encode( $context, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES );
 	if ( false === $context_json ) {
 		return new WP_Error( 'pct_openai_encode_failed', 'OpenAI 입력 데이터를 만들지 못했습니다.' );
@@ -358,7 +498,7 @@ function personal_cta_threads_fact_schema() {
 					),
 				),
 			),
-			'blockers'         => array( 'type' => 'array', 'items' => array( 'type' => 'string' ) ),
+			'blockers'         => array( 'type' => 'array', 'maxItems' => 4, 'items' => array( 'type' => 'string' ) ),
 		), $value_fields ),
 	);
 }
@@ -376,17 +516,18 @@ function personal_cta_threads_copy_schema() {
 		'properties'           => array(
 			'text'          => array( 'type' => 'string' ),
 			'hook_angle_id' => array( 'type' => 'string' ),
-			'fact_ids'      => array( 'type' => 'array', 'minItems' => 1, 'items' => array( 'type' => 'string' ) ),
+			'fact_ids'      => array( 'type' => 'array', 'minItems' => 1, 'maxItems' => 12, 'items' => array( 'type' => 'string' ) ),
 			'claims'        => array(
 				'type'     => 'array',
 				'minItems' => 1,
+				'maxItems' => 8,
 				'items'    => array(
 					'type'                 => 'object',
 					'additionalProperties' => false,
 					'required'             => array( 'text', 'fact_ids' ),
 					'properties'           => array(
 						'text'     => array( 'type' => 'string' ),
-						'fact_ids' => array( 'type' => 'array', 'minItems' => 1, 'items' => array( 'type' => 'string' ) ),
+						'fact_ids' => array( 'type' => 'array', 'minItems' => 1, 'maxItems' => 4, 'items' => array( 'type' => 'string' ) ),
 					),
 				),
 			),
@@ -632,6 +773,31 @@ PROMPT;
 }
 
 /**
+ * Compact editor prompt used only after the normal editor response exhausted
+ * its output budget. FACT MAP has already passed source validation, so omitting
+ * the raw document here narrows the recovery input without loosening grounding.
+ *
+ * @return string
+ */
+function personal_cta_threads_editor_recovery_prompt() {
+	return <<<'PROMPT'
+# Role
+너는 한 번 끊긴 한국 Threads 최종 편집을 끝내는 편집자다. 제공된 fact_map과 drafts만 근거로 최종본을 새로 쓴다. 후보 라벨이나 순서는 품질 신호가 아니다.
+
+# Write
+- 가장 강한 근거 있는 Hook → 즉시 이유·조건 → 원문이 제시한 첫 행동 → 핵심 1~3개 → 구체적 CTA 순서로 쓴다.
+- 단순 정의, A와 B의 구분, 제목 재설명으로 시작하지 않는다. 원문에 없는 손실·돈·시간·위험·이득은 만들지 않는다.
+- 첫 3문장 안에 원문 근거가 있는 확인·판단·준비 행동이 있으면 분명히 쓴다. 없으면 정확한 조건이나 선택을 앞세운다.
+- CTA는 마지막 줄에 본문에서 말한 기준·조건·순서·자료 중 하나를 구체적으로 연결한다. link_included가 true면 마지막에 👇을 붙이고, false면 링크를 암시하지 않는다.
+- text는 max_body_length 이내, URL·제목·설명은 제외한다. 짧은 문장과 1~2문장 문단을 쓰고, 정보·행동 표시는 1~3개만 쓴다.
+
+# Grounding and output
+- fact_ids와 claims에는 실제 text에 쓴 사실의 F ID만 넣는다. F ID의 must_preserve 항목은 text에 원문 표기 그대로 넣고, 못 넣으면 그 F ID를 쓰지 않는다.
+- claims는 사실을 짧게 분해해 중복 없이 작성한다. 스키마 필드만 출력한다.
+PROMPT;
+}
+
+/**
  * Reviews an editor result for conversion quality without changing its facts.
  *
  * @return string
@@ -868,7 +1034,7 @@ function personal_cta_threads_validate_content_value_map( $fact_map, $known_fact
  * @return true|WP_Error
  */
 function personal_cta_threads_validate_fact_map( $fact_map, $source ) {
-	if ( ! is_array( $fact_map ) || ! isset( $fact_map['facts'], $fact_map['hook_angles'], $fact_map['blockers'] ) || ! is_array( $fact_map['facts'] ) || ! is_array( $fact_map['hook_angles'] ) || ! is_array( $fact_map['blockers'] ) || count( $fact_map['facts'] ) > 12 ) {
+	if ( ! is_array( $fact_map ) || ! isset( $fact_map['facts'], $fact_map['hook_angles'], $fact_map['blockers'] ) || ! is_array( $fact_map['facts'] ) || ! is_array( $fact_map['hook_angles'] ) || ! is_array( $fact_map['blockers'] ) || count( $fact_map['facts'] ) > 12 || count( $fact_map['blockers'] ) > 4 ) {
 		return new WP_Error( 'pct_invalid_fact_map', 'FACT MAP의 필수 항목이 올바르지 않습니다.' );
 	}
 	$has_blockers = false;
@@ -989,8 +1155,9 @@ function personal_cta_threads_validate_copy( $copy, $fact_map, $expected_hook = 
 			$facts[ (string) $fact['id'] ] = $fact;
 		}
 	}
-	$used  = isset( $copy['fact_ids'] ) && is_array( $copy['fact_ids'] ) ? array_values( array_unique( $copy['fact_ids'] ) ) : array();
-	if ( empty( $used ) || empty( $copy['claims'] ) || ! is_array( $copy['claims'] ) ) {
+	$raw_used = isset( $copy['fact_ids'] ) && is_array( $copy['fact_ids'] ) ? $copy['fact_ids'] : array();
+	$used     = array_values( array_unique( $raw_used ) );
+	if ( empty( $used ) || empty( $copy['claims'] ) || ! is_array( $copy['claims'] ) || count( $raw_used ) > 12 || count( $copy['claims'] ) > 8 ) {
 		return new WP_Error( 'pct_invalid_copy', 'AI 본문의 근거 추적 정보가 없습니다.' );
 	}
 	$used_set = array_fill_keys( array_map( 'strval', $used ), true );
@@ -1001,7 +1168,7 @@ function personal_cta_threads_validate_copy( $copy, $fact_map, $expected_hook = 
 	$claimed = array();
 	foreach ( $copy['claims'] as $claim ) {
 		$ids = is_array( $claim ) && isset( $claim['fact_ids'] ) && is_array( $claim['fact_ids'] ) ? $claim['fact_ids'] : array();
-		if ( empty( $claim['text'] ) || empty( $ids ) ) {
+		if ( empty( $claim['text'] ) || empty( $ids ) || count( $ids ) > 4 ) {
 			return new WP_Error( 'pct_invalid_copy', 'AI 본문의 주장 근거가 올바르지 않습니다.' );
 		}
 		foreach ( $ids as $id ) {
@@ -1147,8 +1314,7 @@ function personal_cta_threads_run_literal_repair( $post_id, $source, $fact_map )
 			'max_body_length'   => personal_cta_threads_body_limit( $post_id ),
 			'link_included'     => $link_included,
 		),
-		personal_cta_threads_copy_schema(),
-		3072
+		personal_cta_threads_copy_schema()
 	);
 	if ( is_wp_error( $response ) ) {
 		return $response;
@@ -1368,6 +1534,9 @@ function personal_cta_threads_generate( $post_id, $regenerate = false ) {
 	$settings      = personal_cta_threads_settings();
 	$link_included = ! empty( $settings['include_link'] );
 	$delivery_context = $link_included ? personal_cta_threads_outbound_url( $post_id ) : '';
+	if ( $link_included && personal_cta_threads_length( $delivery_context ) + 2 >= 500 ) {
+		return new WP_Error( 'pct_outbound_url_too_long', '게시 링크가 너무 길어 500자 Threads 글을 만들 수 없습니다. 링크 또는 UTM 설정을 줄이거나 링크 포함을 끄세요.' );
+	}
 	$style_hash    = hash( 'sha256', personal_cta_threads_style_examples_text() );
 	$run_key       = hash( 'sha256', $source['hash'] . '|' . $model . '|' . wp_json_encode( $versions ) . '|' . $style_hash . '|' . $delivery_context );
 	$saved_key     = (string) personal_cta_threads_meta( $post_id, 'generation_key' );
@@ -1398,6 +1567,8 @@ function personal_cta_threads_generate( $post_id, $regenerate = false ) {
 		delete_post_meta( $post_id, '_pct_threads_conversion_rewrite_done' );
 		delete_post_meta( $post_id, '_pct_threads_conversion_response_id' );
 		delete_post_meta( $post_id, '_pct_threads_editor_response_id' );
+		delete_post_meta( $post_id, '_pct_threads_editor_output_retry' );
+		delete_post_meta( $post_id, '_pct_threads_transport_retry' );
 		delete_post_meta( $post_id, '_pct_threads_repair_response_id' );
 	}
 
@@ -1414,8 +1585,7 @@ function personal_cta_threads_generate( $post_id, $regenerate = false ) {
 			'fact',
 			personal_cta_threads_fact_prompt(),
 			array( 'source_document' => $source['text'] ),
-			personal_cta_threads_fact_schema(),
-			8192
+			personal_cta_threads_fact_schema()
 		);
 		if ( is_wp_error( $response ) ) {
 			return $response;
@@ -1474,8 +1644,7 @@ function personal_cta_threads_generate( $post_id, $regenerate = false ) {
 				'max_body_length' => personal_cta_threads_body_limit( $post_id ),
 				'link_included'   => $link_included,
 			),
-			personal_cta_threads_copy_schema(),
-			3072
+			personal_cta_threads_copy_schema()
 		);
 		if ( is_wp_error( $response ) ) {
 			return $response;
@@ -1515,22 +1684,35 @@ function personal_cta_threads_generate( $post_id, $regenerate = false ) {
 			);
 		}
 
-		personal_cta_threads_set_state( $post_id, 'editing', 'editor' );
+		$editor_output_retry = 1 === (int) personal_cta_threads_meta( $post_id, 'editor_output_retry', 0 );
+		$editor_context      = array(
+			'fact_map'        => $fact_map,
+			'drafts'          => $blind_drafts,
+			'max_body_length' => personal_cta_threads_body_limit( $post_id ),
+			'link_included'   => $link_included,
+		);
+		if ( ! $editor_output_retry ) {
+			$editor_context['source_document'] = $source['text'];
+		}
+
+		personal_cta_threads_set_state( $post_id, 'editing', $editor_output_retry ? 'editor_retry' : 'editor' );
 		personal_cta_threads_heartbeat( $post_id, 600 );
 		$response = personal_cta_threads_openai_request(
 			'editor',
-			personal_cta_threads_editor_prompt(),
-			array(
-				'source_document' => $source['text'],
-				'fact_map'        => $fact_map,
-				'drafts'          => $blind_drafts,
-				'max_body_length' => personal_cta_threads_body_limit( $post_id ),
-				'link_included'   => $link_included,
-			),
+			$editor_output_retry ? personal_cta_threads_editor_recovery_prompt() : personal_cta_threads_editor_prompt(),
+			$editor_context,
 			personal_cta_threads_copy_schema(),
-			4096
+			0,
+			$editor_output_retry
 		);
 		if ( is_wp_error( $response ) ) {
+			if ( ! $editor_output_retry && personal_cta_threads_openai_is_output_limit_error( $response ) ) {
+				personal_cta_threads_set_meta( $post_id, 'editor_output_retry', 1 );
+				personal_cta_threads_set_state( $post_id, 'editing', 'editor_retry' );
+
+				return personal_cta_threads_openai_pending( $post_id );
+			}
+
 			return $response;
 		}
 
@@ -1545,6 +1727,7 @@ function personal_cta_threads_generate( $post_id, $regenerate = false ) {
 		$editor = $response['data'];
 		personal_cta_threads_set_meta( $post_id, 'editor_result', $editor );
 		personal_cta_threads_set_meta( $post_id, 'editor_response_id', $response['response_id'] );
+		delete_post_meta( $post_id, '_pct_threads_editor_output_retry' );
 		personal_cta_threads_openai_checkpoint_usage( $post_id, 'editor', $response['usage'] );
 		personal_cta_threads_set_state( $post_id, 'editing', 'editor_complete' );
 
@@ -1571,8 +1754,7 @@ function personal_cta_threads_generate( $post_id, $regenerate = false ) {
 				'candidate'       => $editor,
 				'link_included'   => $link_included,
 			),
-			personal_cta_threads_quality_schema(),
-			2048
+			personal_cta_threads_quality_schema()
 		);
 		if ( is_wp_error( $response ) ) {
 			return $response;
@@ -1607,8 +1789,7 @@ function personal_cta_threads_generate( $post_id, $regenerate = false ) {
 				'max_body_length'  => personal_cta_threads_body_limit( $post_id ),
 				'link_included'    => $link_included,
 			),
-			personal_cta_threads_copy_schema(),
-			3072
+			personal_cta_threads_copy_schema()
 		);
 		if ( is_wp_error( $response ) ) {
 			return $response;
@@ -1653,8 +1834,7 @@ function personal_cta_threads_generate( $post_id, $regenerate = false ) {
 					'max_body_length' => personal_cta_threads_body_limit( $post_id ),
 					'link_included'   => $link_included,
 				),
-				personal_cta_threads_copy_schema(),
-				3072
+				personal_cta_threads_copy_schema()
 			);
 			if ( is_wp_error( $response ) ) {
 				return $response;
@@ -1767,8 +1947,7 @@ function personal_cta_threads_verify( $post_id, $text ) {
 			'fact_map'        => $fact_map,
 			'candidate_units' => $units,
 		),
-		personal_cta_threads_verifier_schema(),
-		4096
+		personal_cta_threads_verifier_schema()
 	);
 	if ( is_wp_error( $response ) ) {
 		personal_cta_threads_set_meta( $post_id, 'verifier_state', 'failed' );

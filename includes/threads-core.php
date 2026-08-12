@@ -638,6 +638,48 @@ function personal_cta_threads_queue( $post_id, $regenerate = false ) {
 }
 
 /**
+ * Schedules one bounded retry for a transient OpenAI transport failure.
+ *
+ * The marker is generation-wide rather than per stage. It avoids a cost loop
+ * when a provider outage affects several consecutive checkpoints.
+ *
+ * @param int      $post_id Post ID.
+ * @param WP_Error $error OpenAI request error.
+ * @return true|false|WP_Error True when a retry was scheduled.
+ */
+function personal_cta_threads_retry_transient_error( $post_id, $error ) {
+	if ( ! is_wp_error( $error ) || ! function_exists( 'personal_cta_threads_openai_retry_delay' ) ) {
+		return false;
+	}
+
+	$delay = personal_cta_threads_openai_retry_delay( $error );
+	if ( 0 >= $delay ) {
+		return false;
+	}
+
+	$generation_id = (string) personal_cta_threads_meta( $post_id, 'generation_id' );
+	$marker        = personal_cta_threads_meta( $post_id, 'transport_retry', array() );
+	if ( is_array( $marker ) && '' !== $generation_id && $generation_id === ( isset( $marker['generation_id'] ) ? (string) $marker['generation_id'] : '' ) ) {
+		return false;
+	}
+
+	$status = (string) personal_cta_threads_meta( $post_id, 'status', 'queued' );
+	if ( ! personal_cta_threads_is_working( $status ) ) {
+		return false;
+	}
+
+	personal_cta_threads_set_meta( $post_id, 'transport_retry', array(
+		'generation_id' => $generation_id,
+		'stage'         => (string) personal_cta_threads_meta( $post_id, 'stage', 'generation' ),
+		'delay'         => (int) $delay,
+	) );
+	personal_cta_threads_set_state( $post_id, $status, 'retry_wait' );
+	personal_cta_threads_heartbeat( $post_id, max( 90, (int) $delay + 60 ) );
+
+	return personal_cta_threads_continue_job( $post_id, $delay );
+}
+
+/**
  * Executes a resumable generation job.
  *
  * @param int $post_id Post ID.
@@ -671,6 +713,16 @@ function personal_cta_threads_run_job( $post_id ) {
 		personal_cta_threads_heartbeat( $post_id, 600 );
 		$result = personal_cta_threads_generate( $post_id, (bool) personal_cta_threads_meta( $post_id, 'regenerate', 0 ) );
 		if ( is_wp_error( $result ) ) {
+			$retry = personal_cta_threads_retry_transient_error( $post_id, $result );
+			if ( true === $retry ) {
+				$keep_lease = true;
+				return;
+			}
+			if ( is_wp_error( $retry ) ) {
+				personal_cta_threads_set_state( $post_id, 'failed', 'queue', $retry->get_error_message() );
+				return;
+			}
+
 			$stage = (string) personal_cta_threads_meta( $post_id, 'stage', 'generation' );
 			personal_cta_threads_set_state( $post_id, 'failed', '' !== $stage ? $stage : 'generation', $result->get_error_message() );
 			return;
@@ -684,6 +736,9 @@ function personal_cta_threads_run_job( $post_id ) {
 			return;
 		}
 
+	} catch ( Throwable $error ) {
+		$stage = (string) personal_cta_threads_meta( $post_id, 'stage', 'generation' );
+		personal_cta_threads_set_state( $post_id, 'failed', '' !== $stage ? $stage : 'generation', '예기치 않은 서버 오류가 발생했습니다. 다시 생성하세요.' );
 	} finally {
 		if ( ! $keep_lease ) {
 			delete_post_meta( $post_id, '_pct_threads_lease_until' );

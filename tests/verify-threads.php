@@ -12,6 +12,7 @@ $test_options = array();
 $test_meta    = array();
 $test_remote_response = array();
 $test_remote_requests = array();
+$test_permalink       = '';
 
 class Pct_Test_WPDB {
 	public $options = 'options';
@@ -97,7 +98,10 @@ function sanitize_textarea_field( $value ) { return trim( strip_tags( (string) $
 function wp_strip_all_tags( $value, $remove_breaks = false ) { return strip_tags( (string) $value ); }
 function wp_json_encode( $value, $options = 0, $depth = 512 ) { return json_encode( $value, $options, $depth ); }
 function esc_url_raw( $value ) { return (string) $value; }
-function get_permalink( $post_id ) { return 'https://example.test/sample-post/'; }
+function get_permalink( $post_id ) {
+	global $test_permalink;
+	return '' !== $test_permalink ? $test_permalink : 'https://example.test/sample-post/';
+}
 function add_query_arg( $args, $url ) { return $url . '?' . http_build_query( $args ); }
 function get_post( $post_id ) {
 	return (object) array(
@@ -186,6 +190,18 @@ $parsed = personal_cta_threads_openai_parse_response(
 	)
 );
 pct_assert( is_array( $parsed ) && true === $parsed['data']['ok'], 'Responses parsing must find a structured message after reasoning items.' );
+$usage_fixture = personal_cta_threads_openai_usage(
+	array(
+		'usage' => array(
+			'input_tokens'          => 101,
+			'output_tokens'         => 202,
+			'total_tokens'          => 303,
+			'input_tokens_details'  => array( 'cached_tokens' => 55 ),
+			'output_tokens_details' => array( 'reasoning_tokens' => 144 ),
+		),
+	)
+);
+pct_assert( 144 === $usage_fixture['reasoning_tokens'] && 55 === $usage_fixture['cached_tokens'], 'Usage diagnostics must retain only safe reasoning and cache token counts.' );
 
 $refusal = personal_cta_threads_openai_parse_response(
 	array(
@@ -201,7 +217,25 @@ $incomplete = personal_cta_threads_openai_parse_response(
 		'incomplete_details' => array( 'reason' => 'max_output_tokens' ),
 	)
 );
-pct_assert( is_wp_error( $incomplete ) && 'pct_openai_incomplete' === $incomplete->get_error_code() && false !== strpos( $incomplete->get_error_message(), '출력 한도' ), 'Output-token exhaustion must surface as a recoverable OpenAI error.' );
+pct_assert( is_wp_error( $incomplete ) && 'pct_openai_incomplete' === $incomplete->get_error_code() && false !== strpos( $incomplete->get_error_message(), '출력 한도' ) && true === personal_cta_threads_openai_is_output_limit_error( $incomplete ), 'Output-token exhaustion must surface as a recoverable OpenAI error.' );
+$legacy_output_limit = personal_cta_threads_openai_parse_response(
+	array(
+		'status'             => 'incomplete',
+		'incomplete_details' => array( 'reason' => 'max_tokens' ),
+	)
+);
+pct_assert( is_wp_error( $legacy_output_limit ) && true === personal_cta_threads_openai_is_output_limit_error( $legacy_output_limit ), 'Both documented output-limit reason names must use the bounded editor recovery.' );
+$html_gateway_error = personal_cta_threads_openai_parse_response( '<html>gateway error</html>', 502 );
+pct_assert( is_wp_error( $html_gateway_error ) && 'pct_openai_http_502' === $html_gateway_error->get_error_code() && 502 === (int) $html_gateway_error->get_error_data()['http_status'], 'A non-JSON gateway failure must retain its HTTP status.' );
+$quota_error = personal_cta_threads_openai_parse_response( array( 'error' => array( 'code' => 'insufficient_quota' ) ), 429 );
+pct_assert( 0 === personal_cta_threads_openai_retry_delay( $quota_error ), 'Quota errors must not spend an automatic retry.' );
+$rate_limit_error = personal_cta_threads_openai_parse_response( array( 'error' => array( 'code' => 'rate_limit_exceeded' ) ), 429 );
+pct_assert( 60 === personal_cta_threads_openai_retry_delay( $rate_limit_error ) && 30 === personal_cta_threads_openai_retry_delay( new WP_Error( 'pct_openai_network', 'test' ) ), 'Only rate limits and transport failures receive a bounded backoff.' );
+$content_filter_error = personal_cta_threads_openai_parse_response( array( 'status' => 'incomplete', 'incomplete_details' => array( 'reason' => 'content_filter' ) ) );
+$auth_error = personal_cta_threads_openai_parse_response( array( 'error' => array( 'code' => 'invalid_api_key' ) ), 401 );
+pct_assert( 0 === personal_cta_threads_openai_retry_delay( $content_filter_error ) && 0 === personal_cta_threads_openai_retry_delay( $auth_error ), 'Safety, credential, and invalid-request errors must remain final.' );
+pct_assert( array( 'max_output_tokens' => 6144, 'reasoning_effort' => 'medium' ) === personal_cta_threads_openai_stage_options( 'editor' ), 'The normal editor must have a dedicated medium-effort output budget.' );
+pct_assert( array( 'max_output_tokens' => 8192, 'reasoning_effort' => 'low' ) === personal_cta_threads_openai_stage_options( 'editor', true ), 'The bounded editor recovery must trade lower reasoning for a larger budget.' );
 
 $failed_response = personal_cta_threads_openai_parse_response(
 	array(
@@ -245,7 +279,7 @@ $quality_request = personal_cta_threads_openai_request(
 	)
 );
 $quality_payload = json_decode( $test_remote_requests[ count( $test_remote_requests ) - 1 ]['args']['body'], true );
-pct_assert( is_array( $quality_request ) && 'medium' === $quality_payload['reasoning']['effort'], 'The bounded quality check must use medium reasoning effort.' );
+pct_assert( is_array( $quality_request ) && 'medium' === $quality_payload['reasoning']['effort'] && 2048 === $quality_payload['max_output_tokens'], 'The bounded quality check must use its compact medium-effort budget.' );
 
 $multiple_outputs = personal_cta_threads_openai_parse_response(
 	array(
@@ -316,6 +350,11 @@ $copy = array(
 	'claims'        => array( array( 'text' => '첫 문단입니다.', 'fact_ids' => array( 'F1' ) ) ),
 );
 pct_assert( true === personal_cta_threads_validate_copy( $copy, $fact_map, 'H1' ), 'A grounded copy must pass semantic validation.' );
+$copy_schema = personal_cta_threads_copy_schema();
+pct_assert( 12 === $copy_schema['properties']['fact_ids']['maxItems'] && 8 === $copy_schema['properties']['claims']['maxItems'] && 4 === $copy_schema['properties']['claims']['items']['properties']['fact_ids']['maxItems'], 'Copy metadata must stay bounded so it cannot consume the editor output budget.' );
+$too_many_claims = $copy;
+$too_many_claims['claims'] = array_fill( 0, 9, $copy['claims'][0] );
+pct_assert( is_wp_error( personal_cta_threads_validate_copy( $too_many_claims, $fact_map, 'H1' ) ), 'Copy validation must mirror the structured-output claim cap.' );
 $missing_copy         = $copy;
 $missing_copy['text'] = '확인해봐.';
 $missing_error        = personal_cta_threads_validate_copy( $missing_copy, $fact_map, 'H1' );
@@ -390,6 +429,11 @@ $link_toggled_copy = personal_cta_threads_generate( 7, false );
 pct_assert( ! is_array( $link_toggled_copy ) || empty( $link_toggled_copy['reused'] ), 'Changing the outbound-link context must not reuse a copy with a different CTA or body budget.' );
 $link_toggle_settings['include_link'] = true;
 update_option( PERSONAL_CTA_THREADS_SETTINGS_OPTION, $link_toggle_settings );
+$test_permalink = 'https://example.test/' . str_repeat( 'a', 500 );
+$url_request_count = count( $test_remote_requests );
+$url_too_long = personal_cta_threads_generate( 11, false );
+pct_assert( is_wp_error( $url_too_long ) && 'pct_outbound_url_too_long' === $url_too_long->get_error_code() && $url_request_count === count( $test_remote_requests ), 'An impossible outbound URL must fail before any model call.' );
+$test_permalink = '';
 personal_cta_threads_set_meta( 7, 'generation_key', 'outdated-generation-key' );
 personal_cta_threads_set_state( 7, 'queued', 'queued' );
 $outdated_copy = personal_cta_threads_generate( 7, false );
@@ -403,6 +447,23 @@ personal_cta_threads_set_state( 7, 'drafting', 'writer_h2_complete' );
 delete_post_meta( 7, '_pct_threads_lease_until' );
 pct_assert( true === personal_cta_threads_resume( 7 ), 'A stalled job must be requeued without discarding its checkpoints.' );
 pct_assert( 'drafting' === personal_cta_threads_meta( 7, 'status' ) && 'writer_h2_complete' === personal_cta_threads_meta( 7, 'stage' ), 'Resuming must preserve the generation checkpoint state.' );
+
+personal_cta_threads_set_meta( 7, 'generation_id', 'retry-fixture' );
+personal_cta_threads_set_state( 7, 'editing', 'editor' );
+$first_transport_retry = personal_cta_threads_retry_transient_error( 7, new WP_Error( 'pct_openai_network', 'test' ) );
+$second_transport_retry = personal_cta_threads_retry_transient_error( 7, new WP_Error( 'pct_openai_network', 'test' ) );
+pct_assert( true === $first_transport_retry && false === $second_transport_retry && 'retry_wait' === personal_cta_threads_meta( 7, 'stage' ), 'A generation must spend at most one automatic transport retry.' );
+delete_post_meta( 7, '_pct_threads_transport_retry' );
+
+$transport_post_id = 12;
+$transport_request_count = count( $test_remote_requests );
+$test_remote_response = new WP_Error( 'http_request_failed', 'fixture network failure' );
+personal_cta_threads_set_state( $transport_post_id, 'queued', 'queued' );
+personal_cta_threads_run_job( $transport_post_id );
+pct_assert( 'analyzing' === personal_cta_threads_meta( $transport_post_id, 'status' ) && 'retry_wait' === personal_cta_threads_meta( $transport_post_id, 'stage' ), 'A transient model transport failure must retain its checkpoint and wait once.' );
+delete_option( 'personal_cta_threads_' . $transport_post_id . '.lock' );
+personal_cta_threads_run_job( $transport_post_id );
+pct_assert( 'failed' === personal_cta_threads_meta( $transport_post_id, 'status' ) && 'fact' === personal_cta_threads_meta( $transport_post_id, 'stage' ) && $transport_request_count + 2 === count( $test_remote_requests ), 'The second transient failure must stop instead of creating a retry loop.' );
 
 delete_post_meta( 7, '_pct_threads_final_text' );
 delete_post_meta( 7, '_pct_threads_source_hash' );
@@ -461,5 +522,41 @@ pct_assert( is_array( $conversion_pending ) && ! empty( $conversion_pending['pen
 $ready_request_count = count( $test_remote_requests );
 $quality_ready        = personal_cta_threads_generate( $quality_post_id, false );
 pct_assert( is_array( $quality_ready ) && empty( $quality_ready['pending'] ) && 'ready' === personal_cta_threads_meta( $quality_post_id, 'status' ) && $conversion_copy['text'] === personal_cta_threads_meta( $quality_post_id, 'final_text' ) && $ready_request_count === count( $test_remote_requests ), 'A repaired conversion must finish without another quality request.' );
+
+$editor_recovery_post_id = 9;
+$editor_recovery_source  = personal_cta_threads_source( $editor_recovery_post_id );
+$editor_recovery_run_key = hash( 'sha256', $editor_recovery_source['hash'] . '|' . personal_cta_threads_openai_model() . '|' . wp_json_encode( personal_cta_threads_prompt_versions() ) . '|' . hash( 'sha256', personal_cta_threads_style_examples_text() ) . '|' . personal_cta_threads_outbound_url( $editor_recovery_post_id ) );
+$editor_recovery_fact_key = hash( 'sha256', $editor_recovery_source['hash'] . '|' . personal_cta_threads_openai_model() . '|' . PERSONAL_CTA_THREADS_FACT_PROMPT_VERSION . '|' . PERSONAL_CTA_THREADS_SCHEMA_VERSION );
+$editor_recovery_drafts   = array();
+foreach ( array( 'H1', 'H2', 'H3' ) as $editor_recovery_hook_id ) {
+	$editor_recovery_draft                  = $copy;
+	$editor_recovery_draft['hook_angle_id'] = $editor_recovery_hook_id;
+	$editor_recovery_drafts[ $editor_recovery_hook_id ] = $editor_recovery_draft;
+}
+personal_cta_threads_set_meta( $editor_recovery_post_id, 'fact_map', $fact_map );
+personal_cta_threads_set_meta( $editor_recovery_post_id, 'fact_cache_key', $editor_recovery_fact_key );
+personal_cta_threads_set_meta( $editor_recovery_post_id, 'drafts', $editor_recovery_drafts );
+personal_cta_threads_set_meta( $editor_recovery_post_id, 'generation_key', $editor_recovery_run_key );
+personal_cta_threads_set_state( $editor_recovery_post_id, 'editing', 'editor' );
+$editor_request_count = count( $test_remote_requests );
+$test_remote_response = array(
+	'response' => array( 'code' => 200 ),
+	'body'     => wp_json_encode( array( 'status' => 'incomplete', 'incomplete_details' => array( 'reason' => 'max_output_tokens' ) ) ),
+);
+$editor_retry_pending = personal_cta_threads_generate( $editor_recovery_post_id, false );
+$editor_first_payload = json_decode( $test_remote_requests[ count( $test_remote_requests ) - 1 ]['args']['body'], true );
+pct_assert( is_array( $editor_retry_pending ) && ! empty( $editor_retry_pending['pending'] ) && 'editor_retry' === personal_cta_threads_meta( $editor_recovery_post_id, 'stage' ) && 1 === (int) personal_cta_threads_meta( $editor_recovery_post_id, 'editor_output_retry' ) && $editor_request_count + 1 === count( $test_remote_requests ) && 6144 === $editor_first_payload['max_output_tokens'] && 'medium' === $editor_first_payload['reasoning']['effort'], 'A truncated editor must schedule exactly one medium-effort to low-effort recovery.' );
+$test_remote_response = array(
+	'response' => array( 'code' => 200 ),
+	'body'     => wp_json_encode( array(
+		'id'     => 'resp_editor_recovery',
+		'status' => 'completed',
+		'output' => array( array( 'type' => 'message', 'content' => array( array( 'type' => 'output_text', 'text' => wp_json_encode( $copy ) ) ) ) ),
+	) ),
+);
+$editor_recovered     = personal_cta_threads_generate( $editor_recovery_post_id, false );
+$editor_retry_payload = json_decode( $test_remote_requests[ count( $test_remote_requests ) - 1 ]['args']['body'], true );
+$editor_retry_input   = $editor_retry_payload['input'][1]['content'][0]['text'];
+pct_assert( is_array( $editor_recovered ) && ! empty( $editor_recovered['pending'] ) && 'editor_complete' === personal_cta_threads_meta( $editor_recovery_post_id, 'stage' ) && '' === personal_cta_threads_meta( $editor_recovery_post_id, 'editor_output_retry' ) && $editor_request_count + 2 === count( $test_remote_requests ) && 8192 === $editor_retry_payload['max_output_tokens'] && 'low' === $editor_retry_payload['reasoning']['effort'] && false === strpos( $editor_retry_input, '"source_document"' ), 'The single editor recovery must use the compact FACT MAP-only request and then clear its retry marker.' );
 
 echo "Threads copy-generation safeguards are valid.\n";

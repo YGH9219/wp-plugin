@@ -32,6 +32,8 @@
 		failed: '문구 생성에 실패했습니다.',
 	};
 	const stages = {
+		retry_wait: '일시 오류 후 현재 단계를 한 번 다시 시도하는 중',
+		editor_retry: '5/6 최종 문구 편집을 압축해 한 번 복구',
 		queued: '대기열에 등록됨',
 		waiting_lock: '다른 작업이 끝나길 기다리는 중',
 		fact: '1/6 원문의 숫자·조건 분석',
