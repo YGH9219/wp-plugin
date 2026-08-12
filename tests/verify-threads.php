@@ -320,12 +320,21 @@ pct_assert( 3 === count( $diagnostics['drafts'] ) && 'H1' === $diagnostics['draf
 pct_assert( $copy['text'] === $diagnostics['editor']['text'] && $copy['text'] === $diagnostics['repair']['text'] && $copy['text'] === $diagnostics['final']['text'], 'Diagnostics must expose only the saved copy checkpoints.' );
 pct_assert( false === strpos( wp_json_encode( $diagnostics ), 'fact_ids' ), 'Diagnostics must not expose FACT evidence or model metadata.' );
 
-$current_run_key = hash( 'sha256', $source['hash'] . '|' . personal_cta_threads_openai_model() . '|' . wp_json_encode( personal_cta_threads_prompt_versions() ) . '|' . hash( 'sha256', personal_cta_threads_style_examples_text() ) );
+$current_delivery_context = personal_cta_threads_outbound_url( 7 );
+$current_run_key = hash( 'sha256', $source['hash'] . '|' . personal_cta_threads_openai_model() . '|' . wp_json_encode( personal_cta_threads_prompt_versions() ) . '|' . hash( 'sha256', personal_cta_threads_style_examples_text() ) . '|' . $current_delivery_context );
 personal_cta_threads_set_meta( 7, 'source_hash', $source['hash'] );
 personal_cta_threads_set_meta( 7, 'generation_key', $current_run_key );
 personal_cta_threads_set_state( 7, 'queued', 'queued' );
 $reused_copy = personal_cta_threads_generate( 7, false );
 pct_assert( is_array( $reused_copy ) && ! empty( $reused_copy['reused'] ) && 'ready' === personal_cta_threads_meta( 7, 'status' ), 'A matching completed generation must restore ready state without calling the model.' );
+$link_toggle_settings                 = personal_cta_threads_settings();
+$link_toggle_settings['include_link'] = false;
+update_option( PERSONAL_CTA_THREADS_SETTINGS_OPTION, $link_toggle_settings );
+personal_cta_threads_set_state( 7, 'queued', 'queued' );
+$link_toggled_copy = personal_cta_threads_generate( 7, false );
+pct_assert( ! is_array( $link_toggled_copy ) || empty( $link_toggled_copy['reused'] ), 'Changing the outbound-link context must not reuse a copy with a different CTA or body budget.' );
+$link_toggle_settings['include_link'] = true;
+update_option( PERSONAL_CTA_THREADS_SETTINGS_OPTION, $link_toggle_settings );
 personal_cta_threads_set_meta( 7, 'generation_key', 'outdated-generation-key' );
 personal_cta_threads_set_state( 7, 'queued', 'queued' );
 $outdated_copy = personal_cta_threads_generate( 7, false );
