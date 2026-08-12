@@ -34,15 +34,19 @@
 	const stages = {
 		queued: '대기열에 등록됨',
 		waiting_lock: '다른 작업이 끝나길 기다리는 중',
-		fact: '1/5 원문의 숫자·조건 분석',
-		writer_h1: '2/5 초안 1/3 작성',
-		writer_h1_complete: '2/5 초안 1/3 완료',
-		writer_h2: '3/5 초안 2/3 작성',
-		writer_h2_complete: '3/5 초안 2/3 완료',
-		writer_h3: '4/5 초안 3/3 작성',
-		writer_h3_complete: '4/5 초안 3/3 완료',
-		editor: '5/5 최종 문구 편집',
-		editor_complete: '5/5 최종 문구 점검',
+		fact: '1/6 원문의 숫자·조건 분석',
+		writer_h1: '2/6 초안 1/3 작성',
+		writer_h1_complete: '2/6 초안 1/3 완료',
+		writer_h2: '3/6 초안 2/3 작성',
+		writer_h2_complete: '3/6 초안 2/3 완료',
+		writer_h3: '4/6 초안 3/3 작성',
+		writer_h3_complete: '4/6 초안 3/3 완료',
+		editor: '5/6 최종 문구 편집',
+		editor_complete: '5/6 최종 문구 점검',
+		quality: '6/6 전환력 품질 심사',
+		quality_complete: '6/6 전환력 심사 완료',
+		conversion_repair: '전환력 기준에 맞춰 1회 보정',
+		conversion_repair_complete: '전환력 보정 완료',
 		literal_repair: '필수 숫자·조건 보정',
 		repair: '500자 제한에 맞춰 정리',
 		repair_complete: '최종 길이 점검',
@@ -70,15 +74,31 @@
 			options.body = JSON.stringify( body );
 		}
 
-		const response = await window.fetch( endpoint( postId, suffix ), options );
-		let data = {};
+		let response;
+		try {
+			response = await window.fetch( endpoint( postId, suffix ), options );
+		} catch ( ignored ) {
+			throw new Error( '서버에 연결하지 못했습니다. 네트워크 연결을 확인한 뒤 다시 시도하세요.' );
+		}
+
+		let data = null;
+		let parsed = true;
 		try {
 			data = await response.json();
 		} catch ( ignored ) {
-			data = {};
+			parsed = false;
 		}
 		if ( ! response.ok ) {
-			throw new Error( data.message || '요청을 처리하지 못했습니다.' );
+			if ( data && typeof data.message === 'string' && data.message ) {
+				throw new Error( data.message + ' (HTTP ' + response.status + ')' );
+			}
+			throw new Error( parsed
+				? '서버 요청에 실패했습니다. HTTP ' + response.status + '.'
+				: '서버가 읽을 수 없는 응답을 보냈습니다. HTTP ' + response.status + '.'
+			);
+		}
+		if ( ! parsed || ! data || typeof data !== 'object' || Array.isArray( data ) ) {
+			throw new Error( '서버 응답을 해석하지 못했습니다. HTTP ' + response.status + '.' );
 		}
 
 		return data;
@@ -125,6 +145,7 @@
 			}
 
 			return request( postId, '', 'GET' ).then( function ( nextState ) {
+				setError( '' );
 				setState( nextState );
 				return nextState;
 			} ).catch( function ( requestError ) {

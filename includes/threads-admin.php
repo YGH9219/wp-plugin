@@ -259,9 +259,15 @@ function personal_cta_threads_rest_error( $error, $fallback = 500 ) {
  */
 function personal_cta_threads_admin_state( $post_id ) {
 	$state   = personal_cta_threads_state( $post_id );
-	$text    = (string) $state['text'];
+	$ready   = 'ready' === $state['status'];
+	$text    = $ready ? (string) $state['text'] : '';
 	$payload = '' === $text ? null : personal_cta_threads_payload_text( $post_id, $text );
 
+	if ( ! $ready ) {
+		$state['text']        = '';
+		$state['ai_original'] = '';
+		$state['length']      = 0;
+	}
 	$state['copy_text'] = '';
 	$state['poll']      = personal_cta_threads_is_working( $state['status'] );
 	if ( is_array( $payload ) ) {
