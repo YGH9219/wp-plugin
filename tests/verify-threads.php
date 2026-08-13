@@ -406,7 +406,7 @@ pct_assert( is_wp_error( personal_cta_threads_validate_copy( $missing_structure,
 pct_assert( is_wp_error( personal_cta_threads_validate_copy( $copy, $fact_map, $strategy, 'H1', 'question_answer' ) ), 'A writer may not change its assigned structure.' );
 
 $quality_schema = personal_cta_threads_quality_schema();
-pct_assert( array( 'decision', 'issues', 'copy' ) === $quality_schema['required'] && in_array( 'generic_meta_cta', $quality_schema['properties']['issues']['items']['enum'], true ), 'Final quality must return a bounded decision and candidate.' );
+pct_assert( array( 'decision', 'issues', 'copy' ) === $quality_schema['required'] && in_array( 'generic_meta_cta', $quality_schema['properties']['issues']['items']['enum'], true ) && in_array( 'grounding_strengthened', $quality_schema['properties']['issues']['items']['enum'], true ), 'Final quality must return a bounded decision and catch wording stronger than its evidence.' );
 $pass_quality = array( 'decision' => 'pass', 'issues' => array(), 'copy' => $copy );
 pct_assert( true === personal_cta_threads_validate_quality_review( $pass_quality ), 'A pass with unchanged copy and no issues must validate.' );
 $rewrite_copy         = $copy;
@@ -441,7 +441,28 @@ $units = personal_cta_threads_candidate_units( $copy['text'] );
 $verifier_pass = pct_verifier_result( $copy['text'], true );
 pct_assert( true === personal_cta_threads_validate_verifier( $verifier_pass, $fact_map, $source['text'], $units, array( 'F1' ) ), 'Every delivered fact must receive a supported verifier result.' );
 $verifier_block = pct_verifier_result( $copy['text'], false );
-pct_assert( is_wp_error( personal_cta_threads_validate_verifier( $verifier_block, $fact_map, $source['text'], $units, array( 'F1' ) ) ), 'An unsupported verifier result must block delivery.' );
+$verifier_block_error = personal_cta_threads_validate_verifier( $verifier_block, $fact_map, $source['text'], $units, array( 'F1' ) );
+pct_assert( is_wp_error( $verifier_block_error ) && 'pct_verifier_blocked' === $verifier_block_error->get_error_code() && 'T001' === $verifier_block_error->get_error_data()['unit_id'], 'An unsupported verifier result must block delivery with its exact unit.' );
+$missing_fact_refs = $verifier_pass;
+$missing_fact_refs['checks'][0]['fact_ids'] = array();
+pct_assert( 'pct_invalid_verifier' === personal_cta_threads_validate_verifier( $missing_fact_refs, $fact_map, $source['text'], $units, array( 'F1' ) )->get_error_code(), 'A supported verdict without FACT IDs is malformed verifier output, not an unsupported claim.' );
+$missing_source_refs = $verifier_pass;
+$missing_source_refs['checks'][0]['evidence_ids'] = array();
+pct_assert( 'pct_invalid_verifier' === personal_cta_threads_validate_verifier( $missing_source_refs, $fact_map, $source['text'], $units, array( 'F1' ) )->get_error_code(), 'A supported verdict without source IDs is malformed verifier output, not an unsupported claim.' );
+$inconsistent_verifier             = $verifier_pass;
+$inconsistent_verifier['decision'] = 'block';
+$inconsistent_verifier['issues']   = array( 'contradictory summary' );
+pct_assert( 'pct_invalid_verifier' === personal_cta_threads_validate_verifier( $inconsistent_verifier, $fact_map, $source['text'], $units, array( 'F1' ) )->get_error_code(), 'A block summary with only supported units is malformed verifier output.' );
+$sentence_units = personal_cta_threads_candidate_units( "첫 문단입니다. 더 확인해봐 👇" );
+$sentence_verifier = array(
+	'decision' => 'pass',
+	'checks'   => array(
+		array( 'unit_id' => 'T001', 'claim' => '첫 문단입니다.', 'verdict' => 'supported', 'fact_ids' => array( 'F1' ), 'evidence_ids' => array( 'S002' ), 'reason' => 'direct source support' ),
+		array( 'unit_id' => 'T002', 'claim' => '더 확인해봐 👇', 'verdict' => 'non_factual', 'fact_ids' => array(), 'evidence_ids' => array(), 'reason' => 'navigation CTA only' ),
+	),
+	'issues'   => array(),
+);
+pct_assert( 2 === count( $sentence_units ) && 'T002' === $sentence_units[1]['id'] && true === personal_cta_threads_validate_verifier( $sentence_verifier, $fact_map, $source['text'], $sentence_units, array( 'F1' ) ), 'Verifier units must split sentences and allow a separate non-factual CTA.' );
 
 /* Normal v0.5 generation: FACT, strategy, three writers, editor, quality, verifier. */
 $normal_post_id        = 20;
@@ -496,7 +517,8 @@ pct_assert( is_wp_error( $fact_retry_fail_result ) && 'pct_fact_preserve_not_gro
 
 $diagnostics = personal_cta_threads_admin_diagnostics( $normal_post_id );
 $diagnostic_json = wp_json_encode( $diagnostics );
-pct_assert( 3 === count( $diagnostics['drafts'] ) && 'A' === $diagnostics['drafts'][0]['id'] && 'pass' === $diagnostics['final_quality']['decision'] && 'pass' === $diagnostics['verifier']['decision'], 'Diagnostics must expose the v0.5 checkpoints.' );
+$diagnostic_check = $diagnostics['verifier']['checks'][0];
+pct_assert( 3 === count( $diagnostics['drafts'] ) && 'A' === $diagnostics['drafts'][0]['id'] && 'pass' === $diagnostics['final_quality']['decision'] && 'pass' === $diagnostics['verifier']['decision'] && 'T001' === $diagnostic_check['unit_id'] && 'direct source support' === $diagnostic_check['reason'] && array( 'F1' ) === $diagnostic_check['fact_ids'] && array( 'S002' ) === $diagnostic_check['source_ids'], 'Diagnostics must expose the v0.5 checkpoints and safe sentence-level verifier reasons.' );
 pct_assert( false === strpos( $diagnostic_json, 'evidence' ) && false === strpos( $diagnostic_json, 'must_preserve' ) && false === strpos( $diagnostic_json, 'response_id' ), 'Diagnostics must hide source evidence and provider metadata.' );
 $reuse_start = count( $test_remote_requests );
 $reused      = personal_cta_threads_generate( $normal_post_id, false );
@@ -554,6 +576,8 @@ $blocked_start         = count( $test_remote_requests );
 $blocked_result        = pct_drive_generation( $blocked_post_id );
 pct_assert( is_wp_error( $blocked_result ) && 'pct_verifier_blocked' === $blocked_result->get_error_code() && 'blocked' === personal_cta_threads_meta( $blocked_post_id, 'verifier_state' ), 'An unsupported final verifier result must block readiness.' );
 pct_assert( 'ready' !== personal_cta_threads_meta( $blocked_post_id, 'status' ) && 8 === count( $test_remote_requests ) - $blocked_start, 'A blocked verifier must not expose a ready generation.' );
+$blocked_diagnostics = personal_cta_threads_admin_diagnostics( $blocked_post_id );
+pct_assert( 'blocked' === $blocked_diagnostics['verifier']['state'] && 'unsupported' === $blocked_diagnostics['verifier']['checks'][0]['verdict'] && 'not supported' === $blocked_diagnostics['verifier']['checks'][0]['reason'], 'Blocked diagnostics must retain the exact safe verifier verdict and reason.' );
 
 /* Repairs and retries cannot exceed the per-generation provider-call ceiling. */
 $cap_post_id = 23;

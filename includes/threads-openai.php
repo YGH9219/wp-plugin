@@ -6,12 +6,12 @@
 defined( 'ABSPATH' ) || exit;
 
 define( 'PERSONAL_CTA_THREADS_FACT_PROMPT_VERSION', '5.2' );
-define( 'PERSONAL_CTA_THREADS_STRATEGY_PROMPT_VERSION', '1.0' );
-define( 'PERSONAL_CTA_THREADS_WRITER_PROMPT_VERSION', '9.0' );
-define( 'PERSONAL_CTA_THREADS_EDITOR_PROMPT_VERSION', '6.0' );
-define( 'PERSONAL_CTA_THREADS_QUALITY_PROMPT_VERSION', '2.0' );
-define( 'PERSONAL_CTA_THREADS_VERIFIER_PROMPT_VERSION', '3.0' );
-define( 'PERSONAL_CTA_THREADS_REPAIR_PROMPT_VERSION', '2.0' );
+define( 'PERSONAL_CTA_THREADS_STRATEGY_PROMPT_VERSION', '1.1' );
+define( 'PERSONAL_CTA_THREADS_WRITER_PROMPT_VERSION', '9.1' );
+define( 'PERSONAL_CTA_THREADS_EDITOR_PROMPT_VERSION', '6.1' );
+define( 'PERSONAL_CTA_THREADS_QUALITY_PROMPT_VERSION', '2.1' );
+define( 'PERSONAL_CTA_THREADS_VERIFIER_PROMPT_VERSION', '3.1' );
+define( 'PERSONAL_CTA_THREADS_REPAIR_PROMPT_VERSION', '2.1' );
 define( 'PERSONAL_CTA_THREADS_SCHEMA_VERSION', '3.1' );
 define( 'PERSONAL_CTA_THREADS_CALL_LIMIT', 11 );
 
@@ -592,7 +592,7 @@ function personal_cta_threads_quality_schema() {
 			'decision' => array( 'type' => 'string', 'enum' => array( 'pass', 'rewrite' ) ),
 			'issues'   => array(
 				'type'     => 'array',
-				'maxItems' => 7,
+				'maxItems' => 8,
 				'items'    => array(
 					'type' => 'string',
 					'enum' => array(
@@ -603,6 +603,7 @@ function personal_cta_threads_quality_schema() {
 						'weak_hook',
 						'poor_rhythm',
 						'tone_mismatch',
+						'grounding_strengthened',
 					),
 				),
 			),
@@ -693,6 +694,7 @@ function personal_cta_threads_strategy_prompt() {
 3. 손실·돈·시간·위험·혜택은 연결한 F ID가 직접 뒷받침할 때만 쓴다. 근거가 약하면 선택·조건·반전을 사용한다.
 4. Writer A/B/C에 서로 다른 hook_id와 서로 다른 structure_id를 배정한다. reversal은 실제 대조 근거가 있을 때만, mistake_prevention은 피할 행동이 원문에 있을 때만 쓴다. question_answer는 새 전제를 만들지 않고, problem_action_conditions는 조건을 최대 2개만 쓰며, short_discovery는 억지 인사이트를 만들지 않는다. 선택지는 reversal, mistake_prevention, short_discovery, question_answer, problem_action_conditions다.
 5. 단순 절차·정의처럼 첫 문단의 힘을 떨어뜨리는 사실은 boring_fact_ids에 최대 4개 표시하되 삭제나 왜곡을 지시하지 않는다.
+6. 원문의 필요 행동·시점·권고를 금지·의무·최우선 순서로 강화하지 않는다. fact에 "첫 번째·가장 먼저·금지·반드시"가 없으면 hook과 writer plan에도 그런 우선순위나 강도를 만들지 않는다.
 
 전략 메모는 공개 사실이 아니다. reader_assumption을 "다들·대부분·흔히 그렇게 생각한다"같은 대중 통념 주장으로 카피에 쓰지 않는다. 최종 카피의 주장은 항상 원래 F ID로 다시 추적한다. 스키마 필드만 출력한다.
 PROMPT;
@@ -713,8 +715,9 @@ function personal_cta_threads_writer_prompt() {
 - mistake_prevention: 피해야 할 선택과 바로 할 행동을 대비한다.
 - short_discovery: 가장 의외인 사실을 짧게 공개하고 의미를 잇는다.
 - question_answer: 독자의 구체적 질문에 곧바로 답한다.
-- problem_action_conditions: 문제, 첫 행동, 적용 조건 순서로 전개한다.
+- problem_action_conditions: 구체적 문제, 원문이 뒷받침하는 행동, 적용 조건 순서로 전개한다. 행동을 "첫 행동"이나 최우선 순서로 강화하지 않는다.
 - 고정된 Hook→Why→Action 공식을 억지로 반복하지 않는다. 원문 순서 요약과 번호 안내문도 쓰지 않는다.
+- 원문의 권고를 금지로, 필요한 작업을 최우선 행동으로, 가능성을 확정으로 바꾸지 않는다. fact에 없는 "첫 행동·가장 먼저·무조건·반드시·절대·~하지 마"를 추가하지 않는다.
 - 첫 1~2문장만 읽어도 대상·상황·선택이 분명해야 한다. 단순 정의나 제목 재설명으로 시작하지 않는다.
 - fact_ids와 claims에는 실제로 쓴 F ID만 넣고 must_preserve를 원문 표기대로 보존한다.
 - 자연스러운 한국어 반말, 짧고 길이가 다른 문장, 1~2문장 문단을 쓴다. 이모지는 필요할 때만 0~2개 쓰고 첫 글자의 습관적 경고 이모지는 피한다.
@@ -736,6 +739,7 @@ function personal_cta_threads_editor_prompt() {
 너는 한국 Threads 편집장이다. fact_map, strategy, drafts만 사용해 최종 후보를 새로 쓴다. 원문·라벨·후보 순서를 품질 신호로 사용하지 않는다.
 
 - 사실성은 점수가 아니라 자격 조건이다. F ID로 추적되지 않는 후보 문장은 버린다.
+- 원문의 권고를 금지로, 필요한 작업을 최우선 행동으로, 가능성을 확정으로 강화한 후보는 버린다. fact가 직접 말하지 않은 "첫 행동·가장 먼저·무조건·반드시·절대·~하지 마"를 만들지 않는다.
 - strategy.reader_assumption은 내부 가설이므로 원문 사실 없이 "다들·대부분·흔히·사람들은"같은 대중 통념으로 써서는 안 된다.
 - 후보를 이어 붙이지 말고, strategy의 core_tension과 best_reveal을 가장 잘 살리는 hook과 structure를 하나 고른다.
 - 첫 문장은 구체적인 반전·선택·조건·질문·피해야 할 실수 중 근거가 가장 강한 것으로 시작한다. 정의·행정 안내·제목 재설명은 금지한다. 강한 명령이라도 첫 1~2문장에 그 조언이 적용되는 대상·상황·계기가 안 보이면 약한 Hook이다.
@@ -777,9 +781,10 @@ function personal_cta_threads_quality_prompt() {
 - weak_hook: 첫 문장이 정의·배경·제목 재설명이거나, 첫 1~2문장만으로 조언의 대상·상황·계기를 알 수 없어 멈출 이유가 없다.
 - poor_rhythm: 비슷한 길이의 설명문이 이어져 피드 리듬이 없다.
 - tone_mismatch: 존댓말과 반말이 섞이거나 번역투다.
+- grounding_strengthened: 원문·FACT의 권고나 필요 작업을 금지·의무·최우선으로, 가능성을 확정으로 강화했다. 예를 들어 단순히 수거 전에 필요한 준비를 "첫 행동"이라 하거나, 먼저 확인하라는 조언을 "하지 마"라는 금지로 바꾸면 해당한다.
 
 문제가 없으면 decision=pass, issues=[]로 하고 copy를 candidate와 모든 필드까지 정확히 같게 돌려준다.
-문제가 있으면 decision=rewrite로 하고 해당 issues를 넣은 뒤 딱 한 번 새 copy를 쓴다. candidate의 hook_angle_id와 structure_id를 유지하고, candidate가 쓰지 않은 F ID는 새로 쓰지 않는다. 단, 첫 1~2문장의 독립 맥락에 필요한 fact_map.context_fact_ids가 candidate에 빠졌다면 그 ID만 추가해 복구할 수 있다. 새 사실·손실·혜택·인과를 만들지 말고 must_preserve를 지킨다. 첫 문장은 근거 있는 반전·선택·조건·질문·실수 방지 중 가장 강한 형태로, 마지막은 구체적 행동이나 판단으로 쓴다. 메타 CTA는 금지하며 link_included가 true면 끝에 👇만 붙일 수 있다. max_body_length 이내로 쓴다.
+문제가 있으면 decision=rewrite로 하고 해당 issues를 넣은 뒤 딱 한 번 새 copy를 쓴다. candidate의 hook_angle_id와 structure_id를 유지하고, candidate가 쓰지 않은 F ID는 새로 쓰지 않는다. 단, 첫 1~2문장의 독립 맥락에 필요한 fact_map.context_fact_ids가 candidate에 빠졌다면 그 ID만 추가해 복구할 수 있다. 새 사실·손실·혜택·인과·금지·우선순위를 만들지 말고 must_preserve를 지킨다. 첫 문장은 근거 있는 반전·선택·조건·질문·실수 방지 중 가장 강한 형태로, 마지막은 구체적 행동이나 판단으로 쓴다. 메타 CTA는 금지하며 link_included가 true면 끝에 👇만 붙일 수 있다. max_body_length 이내로 쓴다.
 
 스키마 필드만 출력한다.
 PROMPT;
@@ -794,7 +799,7 @@ function personal_cta_threads_repair_prompt() {
 	return <<<'PROMPT'
 너는 한국 Threads 최종 교열자다. fact_map, strategy, draft만 사용한다.
 
-draft의 hook_angle_id와 structure_id, 적용 맥락, 긴장감, 구체적 마무리를 유지하면서 max_body_length 이하로 줄인다. 세부 설명과 중복부터 덜어낸다. 새 사실이나 F ID를 추가하지 않고 숫자·기간·조건·예외·가능성 표현과 required_literals를 원문 표기대로 보존한다. strategy.reader_assumption은 내부 가설이므로 원문 사실 없이 "다들·대부분·흔히·사람들은"같은 통념 주장을 추가하지 않는다. 원문·본문·링크·아래·여기를 확인·대조·살펴·읽어·참고하라는 메타 CTA를 만들지 않는다. 자연스러운 반말, 문단 리듬, 0~2개 이모지를 유지한다. URL은 넣지 않는다.
+draft의 hook_angle_id와 structure_id, 적용 맥락, 긴장감, 구체적 마무리를 유지하면서 max_body_length 이하로 줄인다. 세부 설명과 중복부터 덜어낸다. 새 사실이나 F ID를 추가하지 않고 숫자·기간·조건·예외·가능성 표현과 required_literals를 원문 표기대로 보존한다. 원문의 권고를 금지로, 필요한 작업을 최우선 행동으로, 가능성을 확정으로 강화하지 않는다. strategy.reader_assumption은 내부 가설이므로 원문 사실 없이 "다들·대부분·흔히·사람들은"같은 통념 주장을 추가하지 않는다. 원문·본문·링크·아래·여기를 확인·대조·살펴·읽어·참고하라는 메타 CTA를 만들지 않는다. 자연스러운 반말, 문단 리듬, 0~2개 이모지를 유지한다. URL은 넣지 않는다.
 
 claims와 fact_ids를 수정된 text에 맞춘다. 스키마 필드만 출력한다.
 PROMPT;
@@ -861,9 +866,17 @@ candidate의 각 사실 주장을 빠짐없이 검사한다.
 
 candidate_units의 T ID를 하나도 빠뜨리지 말고 입력 순서대로 정확히 한 번씩 검사한다. claim에는 해당 unit의 text를 바꾸지 말고 그대로 넣는다.
 
+검증 경계:
+- 인접 unit은 생략된 주어를 이해하는 문맥일 뿐 근거가 아니다.
+- 후킹 강도, 말투, 이모지, 문체 자체는 사실 검증 대상이 아니다.
+- 순수한 감탄·전환과 "원문/링크에서 확인해봐 👇"처럼 현재 콘텐츠 자체를 탐색하게 하는 CTA만 non_factual이다.
+- "제출기관에 확인해", "보험 접수번호를 챙겨", "서류를 보내"처럼 현실의 절차·행동·판단을 지시하는 문장은 표현이 부드러워도 원문 근거가 필요하다. 콘텐츠 탐색 CTA와 현실 행동 조언을 혼동하지 않는다.
+- 한 unit에 사실과 CTA가 함께 있으면 사실 부분이 모두 근거 있고 CTA가 새 주장을 만들지 않을 때 supported다.
+- 자연스러운 반말·명령형 변환은 의미를 바꾸지 않을 때만 허용한다. 권고를 금지로, 필요 작업을 최우선으로, 가능성을 확정으로 강화하면 distorted 또는 unsupported다.
+
 verdict 기준:
 - supported: 사실 의미가 있고 원문과 FACT MAP이 직접 지지한다. fact_ids와 evidence_ids가 반드시 필요하다.
-- non_factual: 순수한 감탄, 전환, 사실·위험·혜택·약속을 담지 않은 행동 안내다. fact_ids와 evidence_ids를 비운다. 허위 긴급성이나 결과 약속은 non_factual이 아니다.
+- non_factual: 순수한 감탄·전환 또는 현재 글·원문·링크를 더 보게 하는 탐색 CTA다. 현실의 절차·행동·판단 지시는 여기에 포함하지 않는다. fact_ids와 evidence_ids를 비운다. 허위 긴급성이나 결과 약속도 non_factual이 아니다.
 - unsupported: 원문 근거가 없다.
 - distorted: 숫자·조건·가능성·인과·위험·혜택이 원문과 다르게 바뀌었다.
 - ambiguous: 원문만으로 지지 여부를 확정할 수 없다.
@@ -927,13 +940,13 @@ function personal_cta_threads_normalize_evidence_text( $text ) {
  */
 function personal_cta_threads_candidate_units( $text ) {
 	$units = array();
-	$lines = preg_split( '/\R/u', (string) $text );
-	foreach ( is_array( $lines ) ? $lines : array( (string) $text ) as $line ) {
-		$line = trim( $line );
-		if ( '' !== $line ) {
+	$parts = preg_split( '/(?:\R+|(?<=[.!?。！？])\s+)/u', (string) $text );
+	foreach ( is_array( $parts ) ? $parts : array( (string) $text ) as $part ) {
+		$part = trim( $part );
+		if ( '' !== $part ) {
 			$units[] = array(
 				'id'   => sprintf( 'T%03d', count( $units ) + 1 ),
-				'text' => $line,
+				'text' => $part,
 			);
 		}
 	}
@@ -1280,7 +1293,6 @@ function personal_cta_threads_local_quality_issues( $copy ) {
 	if ( preg_match( '/(?:원문|본문|자세한\s*내용|(?:아래|여기)(?:\s*링크|\s*글|\s*내용))[^\r\n.!?。！？]{0,24}(?:확인|대조|살펴|읽어|참고|봐|보세요)|(?:아래|여기)에서\s*(?:확인|봐|보세요)/u', $text ) ) {
 		$issues[] = 'generic_meta_cta';
 	}
-
 	return array_values( array_unique( $issues ) );
 }
 
@@ -1294,11 +1306,11 @@ function personal_cta_threads_validate_quality_review( $review ) {
 	$decision = is_array( $review ) && isset( $review['decision'] ) ? (string) $review['decision'] : '';
 	$issues   = is_array( $review ) && isset( $review['issues'] ) && is_array( $review['issues'] ) ? $review['issues'] : null;
 	$allowed  = array_fill_keys(
-		array( 'administrative_voice', 'generic_meta_cta', 'emoji_lead', 'formulaic_structure', 'weak_hook', 'poor_rhythm', 'tone_mismatch' ),
+		array( 'administrative_voice', 'generic_meta_cta', 'emoji_lead', 'formulaic_structure', 'weak_hook', 'poor_rhythm', 'tone_mismatch', 'grounding_strengthened' ),
 		true
 	);
 
-	if ( ! in_array( $decision, array( 'pass', 'rewrite' ), true ) || ! is_array( $issues ) || count( $issues ) > 7 || ! isset( $review['copy'] ) || ! is_array( $review['copy'] ) ) {
+	if ( ! in_array( $decision, array( 'pass', 'rewrite' ), true ) || ! is_array( $issues ) || count( $issues ) > 8 || ! isset( $review['copy'] ) || ! is_array( $review['copy'] ) ) {
 		return new WP_Error( 'pct_invalid_quality_review', 'AI 전환력 심사 결과가 올바르지 않습니다.' );
 	}
 
@@ -1486,8 +1498,19 @@ function personal_cta_threads_validate_verifier( $result, $fact_map, $source, $c
 			}
 			continue;
 		}
-		if ( 'supported' !== $verdict || empty( $refs ) || empty( $srcs ) ) {
-			return new WP_Error( 'pct_verifier_blocked', '원문 근거가 불충분한 주장이 있어 게시를 중단했습니다.' );
+		if ( 'supported' === $verdict && ( empty( $refs ) || empty( $srcs ) ) ) {
+			return new WP_Error( 'pct_invalid_verifier', '지원 판정에 필요한 FACT 또는 원문 근거 ID가 누락됐습니다.' );
+		}
+		if ( in_array( $verdict, array( 'unsupported', 'distorted', 'ambiguous' ), true ) ) {
+			$reason = isset( $check['reason'] ) && is_scalar( $check['reason'] ) ? sanitize_text_field( (string) $check['reason'] ) : '';
+			return new WP_Error(
+				'pct_verifier_blocked',
+				'원문 근거가 불충분한 문장이 있습니다: "' . sanitize_text_field( $unit_map[ $unit_id ] ) . '"' . ( '' !== $reason ? ' — ' . $reason : '' ),
+				array( 'unit_id' => $unit_id, 'verdict' => $verdict, 'reason' => $reason )
+			);
+		}
+		if ( 'supported' !== $verdict ) {
+			return new WP_Error( 'pct_invalid_verifier', '사실 검증 판정값이 올바르지 않습니다.' );
 		}
 
 		$allowed_evidence = array();
@@ -1517,7 +1540,7 @@ function personal_cta_threads_validate_verifier( $result, $fact_map, $source, $c
 	}
 
 	if ( 'pass' !== ( isset( $result['decision'] ) ? $result['decision'] : '' ) || ! empty( $result['issues'] ) ) {
-		return new WP_Error( 'pct_verifier_blocked', '사실 검증에서 문제가 발견되어 게시를 중단했습니다.' );
+		return new WP_Error( 'pct_invalid_verifier', '문장별 사실 검증 결과와 최종 판정이 일치하지 않습니다.' );
 	}
 
 	return true;

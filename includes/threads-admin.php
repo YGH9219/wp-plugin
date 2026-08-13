@@ -477,7 +477,22 @@ function personal_cta_threads_admin_diagnostics( $post_id ) {
 			'state'    => sanitize_key( $verifier_state ),
 			'decision' => isset( $verifier['decision'] ) && is_scalar( $verifier['decision'] ) ? trim( (string) $verifier['decision'] ) : '',
 			'issues'   => personal_cta_threads_diagnostic_string_list( isset( $verifier['issues'] ) ? $verifier['issues'] : array() ),
+			'checks'   => array(),
 		);
+		foreach ( isset( $verifier['checks'] ) && is_array( $verifier['checks'] ) ? array_slice( $verifier['checks'], 0, 12 ) : array() as $check ) {
+			if ( ! is_array( $check ) ) {
+				continue;
+			}
+			$unit_id = isset( $check['unit_id'] ) && is_scalar( $check['unit_id'] ) ? trim( (string) $check['unit_id'] ) : '';
+			$safe_verifier['checks'][] = array(
+				'unit_id'    => preg_match( '/^T[0-9]{3}$/', $unit_id ) ? $unit_id : '',
+				'claim'      => isset( $check['claim'] ) && is_scalar( $check['claim'] ) ? sanitize_textarea_field( (string) $check['claim'] ) : '',
+				'verdict'    => isset( $check['verdict'] ) && is_scalar( $check['verdict'] ) ? sanitize_key( (string) $check['verdict'] ) : '',
+				'reason'     => isset( $check['reason'] ) && is_scalar( $check['reason'] ) ? sanitize_textarea_field( (string) $check['reason'] ) : '',
+				'fact_ids'   => personal_cta_threads_diagnostic_string_list( isset( $check['fact_ids'] ) ? $check['fact_ids'] : array() ),
+				'source_ids' => personal_cta_threads_diagnostic_string_list( isset( $check['evidence_ids'] ) ? $check['evidence_ids'] : array() ),
+			);
+		}
 	}
 
 	$final = null;

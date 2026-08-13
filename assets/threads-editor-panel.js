@@ -146,6 +146,16 @@
 		if ( includeCopy && value.copy && value.copy.text ) {
 			lines.push( '', value.copy.text );
 		}
+		if ( Array.isArray( value.checks ) && value.checks.length ) {
+			lines.push( '', '문장별 검증:' );
+			value.checks.forEach( function ( check ) {
+				lines.push(
+					( check.unit_id || '-' ) + ' [' + ( check.verdict || '기록 없음' ) + '] ' + ( check.claim || '' ),
+					'이유: ' + ( check.reason || '기록 없음' ),
+					'FACT: ' + ( Array.isArray( check.fact_ids ) && check.fact_ids.length ? check.fact_ids.join( ', ' ) : '없음' ) + ' / 원문: ' + ( Array.isArray( check.source_ids ) && check.source_ids.length ? check.source_ids.join( ', ' ) : '없음' )
+				);
+			} );
+		}
 
 		return lines.join( '\n' );
 	}
