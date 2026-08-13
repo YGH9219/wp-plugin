@@ -37,6 +37,7 @@
 		queued: '대기열에 등록됨',
 		waiting_lock: '다른 작업이 끝나길 기다리는 중',
 		fact: '1/8 원자 사실 추출',
+		fact_retry: '1/8 원자 사실의 보존 항목을 한 번 다시 추출',
 		strategy: '2/8 콘텐츠 전략·Hook 설계',
 		writer_a: '3/8 Writer A 초안 작성',
 		writer_a_complete: '3/8 Writer A 초안 완료',

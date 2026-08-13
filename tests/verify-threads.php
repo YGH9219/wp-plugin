@@ -303,7 +303,7 @@ $fact_map = array(
 			'subject'       => '첫 문단',
 			'statement'     => '첫 문단입니다.',
 			'evidence'      => array( array( 'source_id' => 'S002', 'quote' => '첫 문단입니다.' ) ),
-			'must_preserve' => array(),
+			'must_preserve' => array( '첫 문단' ),
 		),
 	),
 	'blockers'         => array(),
@@ -313,6 +313,33 @@ pct_assert( array( 'topic', 'reader_situation', 'context_fact_ids', 'facts', 'bl
 pct_assert( ! isset( $fact_schema['properties']['reader_problem'], $fact_schema['properties']['hook_angles'] ) && 12 === $fact_schema['properties']['facts']['maxItems'] && 1 === $fact_schema['properties']['facts']['items']['properties']['evidence']['maxItems'], 'FACT schema must not mix strategy with extraction.' );
 pct_assert( '^F([1-9]|1[0-2])$' === $fact_schema['properties']['facts']['items']['properties']['id']['pattern'] && '\\S' === $fact_schema['properties']['facts']['items']['properties']['subject']['pattern'], 'FACT schema must prevent blank facts and constrain generated IDs.' );
 pct_assert( true === personal_cta_threads_validate_fact_map( $fact_map, $source['text'] ), 'A grounded atomic FACT MAP must validate.' );
+$literal_source = "[S001] 제목: 신청 기준\n\n[S002] 신청 수량은 5대 이상입니다.\n\n[S003] 접수 기간은 3일입니다.";
+$literal_fact_map = array(
+	'topic'            => '신청 기준',
+	'reader_situation' => '신청 수량을 확인하는 독자',
+	'context_fact_ids' => array( 'F1' ),
+	'facts'            => array(
+		array(
+			'id'            => 'F1',
+			'subject'       => '신청 수량',
+			'statement'     => '신청 수량은 5대 이상입니다.',
+			'evidence'      => array( array( 'source_id' => 'S002', 'quote' => '신청 수량은 5대 이상입니다.' ) ),
+			'must_preserve' => array( '5대 이상' ),
+		),
+	),
+	'blockers'         => array(),
+);
+pct_assert( true === personal_cta_threads_validate_fact_map( $literal_fact_map, $literal_source ), 'A literal number-and-condition span must validate.' );
+$whitespace_literal_fact_map = $literal_fact_map;
+$whitespace_literal_fact_map['facts'][0]['must_preserve'] = array( '5대   이상' );
+pct_assert( true === personal_cta_threads_validate_fact_map( $whitespace_literal_fact_map, $literal_source ), 'Whitespace-only differences in a literal span must normalize safely.' );
+$paraphrased_literal_fact_map = $literal_fact_map;
+$paraphrased_literal_fact_map['facts'][0]['must_preserve'] = array( '5대 이하' );
+$paraphrased_literal_error = personal_cta_threads_validate_fact_map( $paraphrased_literal_fact_map, $literal_source );
+pct_assert( is_wp_error( $paraphrased_literal_error ) && 'pct_fact_preserve_not_grounded' === $paraphrased_literal_error->get_error_code(), 'A changed condition must not pass literal preservation.' );
+$other_segment_literal_fact_map = $literal_fact_map;
+$other_segment_literal_fact_map['facts'][0]['must_preserve'] = array( '3일' );
+pct_assert( is_wp_error( personal_cta_threads_validate_fact_map( $other_segment_literal_fact_map, $literal_source ) ), 'A token found only in another source segment must be rejected.' );
 $noncanonical_fact_map                    = $fact_map;
 $noncanonical_fact_map['facts'][0]['id'] = 'primary-fact';
 $noncanonical_fact_map['facts'][]        = array(
@@ -437,6 +464,36 @@ foreach ( $normal_requests as $request ) {
 }
 pct_assert( array( 'threads_fact', 'threads_strategy', 'threads_writer', 'threads_writer', 'threads_writer', 'threads_editor', 'threads_quality', 'threads_verifier' ) === $request_stages, 'The v0.5 request order is invalid.' );
 
+/* One invalid literal-preservation result receives one FACT-only recovery. */
+$fact_retry_post_id = 25;
+$bad_preserve_map = $fact_map;
+$bad_preserve_map['facts'][0]['must_preserve'] = array( '첫 문장이 아님' );
+$test_remote_responses = array_merge(
+	array( pct_openai_response( 'resp_' . $fact_retry_post_id . '_fact_invalid', $bad_preserve_map ) ),
+	pct_pipeline_responses( $fact_retry_post_id, $fact_map, $strategy, $normal_editor, $normal_quality, pct_verifier_result( $normal_editor['text'], true ) )
+);
+$fact_retry_start    = count( $test_remote_requests );
+$fact_retry_result   = pct_drive_generation( $fact_retry_post_id, 14 );
+$fact_retry_requests = array_slice( $test_remote_requests, $fact_retry_start );
+$fact_retry_stages   = array_map(
+	function ( $request ) {
+		$payload = json_decode( $request['args']['body'], true );
+		return $payload['text']['format']['name'];
+	},
+	$fact_retry_requests
+);
+pct_assert( is_array( $fact_retry_result ) && empty( $fact_retry_result['pending'] ) && 9 === count( $fact_retry_requests ) && array( 'threads_fact', 'threads_fact' ) === array_slice( $fact_retry_stages, 0, 2 ), 'A nonliteral preserve token must retry only the FACT checkpoint once.' );
+pct_assert( 9 === (int) personal_cta_threads_meta( $fact_retry_post_id, 'call_count' ) && '' === personal_cta_threads_meta( $fact_retry_post_id, 'fact_validation_retry' ), 'A successful FACT recovery must clear its retry marker.' );
+
+$fact_retry_fail_post_id = 26;
+$test_remote_responses = array(
+	pct_openai_response( 'resp_' . $fact_retry_fail_post_id . '_fact_invalid_1', $bad_preserve_map ),
+	pct_openai_response( 'resp_' . $fact_retry_fail_post_id . '_fact_invalid_2', $bad_preserve_map ),
+);
+$fact_retry_fail_start  = count( $test_remote_requests );
+$fact_retry_fail_result = pct_drive_generation( $fact_retry_fail_post_id, 4 );
+pct_assert( is_wp_error( $fact_retry_fail_result ) && 'pct_fact_preserve_not_grounded' === $fact_retry_fail_result->get_error_code() && 2 === count( $test_remote_requests ) - $fact_retry_fail_start, 'A second invalid FACT preserve result must fail without a third provider call.' );
+
 $diagnostics = personal_cta_threads_admin_diagnostics( $normal_post_id );
 $diagnostic_json = wp_json_encode( $diagnostics );
 pct_assert( 3 === count( $diagnostics['drafts'] ) && 'A' === $diagnostics['drafts'][0]['id'] && 'pass' === $diagnostics['final_quality']['decision'] && 'pass' === $diagnostics['verifier']['decision'], 'Diagnostics must expose the v0.5 checkpoints.' );
@@ -515,6 +572,26 @@ $cap_error = personal_cta_threads_pipeline_request(
 	)
 );
 pct_assert( is_wp_error( $cap_error ) && 'pct_call_limit' === $cap_error->get_error_code() && $cap_start === count( $test_remote_requests ), 'The call cap must stop before another provider request.' );
+
+/* One final verifier call remains available after one bounded recovery/repair combination. */
+$reserve_post_id = 29;
+$reserve_schema  = array(
+	'type'                 => 'object',
+	'additionalProperties' => false,
+	'required'             => array( 'ok' ),
+	'properties'           => array( 'ok' => array( 'type' => 'boolean' ) ),
+);
+personal_cta_threads_set_meta( $reserve_post_id, 'call_count', PERSONAL_CTA_THREADS_CALL_LIMIT - 2 );
+$test_remote_responses = array(
+	pct_openai_response( 'resp_reserved_repair', array( 'ok' => true ) ),
+	pct_openai_response( 'resp_reserved_verifier', array( 'ok' => true ) ),
+);
+$reserve_start  = count( $test_remote_requests );
+$reserve_repair = personal_cta_threads_pipeline_request( $reserve_post_id, 'repair', 'test', array(), $reserve_schema );
+$reserve_verify = personal_cta_threads_pipeline_request( $reserve_post_id, 'verifier', 'test', array(), $reserve_schema );
+$reserve_block  = personal_cta_threads_pipeline_request( $reserve_post_id, 'repair', 'test', array(), $reserve_schema );
+pct_assert( is_array( $reserve_repair ) && is_array( $reserve_verify ) && 2 === count( $test_remote_requests ) - $reserve_start, 'A bounded repair followed by the reserved verifier must both reach the provider.' );
+pct_assert( PERSONAL_CTA_THREADS_CALL_LIMIT === (int) personal_cta_threads_meta( $reserve_post_id, 'call_count' ) && is_wp_error( $reserve_block ) && 'pct_call_limit' === $reserve_block->get_error_code(), 'The reserved verifier may use the final slot, but no later provider call may run.' );
 
 $queued = personal_cta_threads_queue( 30, false );
 pct_assert( true === $queued && 'queued' === personal_cta_threads_meta( 30, 'status' ), 'A generation request must queue without publishing.' );
