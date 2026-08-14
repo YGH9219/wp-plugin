@@ -405,6 +405,38 @@ unset( $missing_structure['structure_id'] );
 pct_assert( is_wp_error( personal_cta_threads_validate_copy( $missing_structure, $fact_map, $strategy ) ), 'A copy without structure_id must be rejected.' );
 pct_assert( is_wp_error( personal_cta_threads_validate_copy( $copy, $fact_map, $strategy, 'H1', 'question_answer' ) ), 'A writer may not change its assigned structure.' );
 
+/* Editor literal repair must keep the editor contract until final quality adds context. */
+$editor_repair_post_id  = 32;
+$editor_repair_fact_map = $fact_map;
+$editor_repair_fact_map['facts'][0]['must_preserve'] = array();
+$editor_repair_fact_map['facts'][] = array(
+	'id'            => 'F2',
+	'subject'       => 'quantity',
+	'statement'     => 'At least 5 units are required.',
+	'evidence'      => array( array( 'source_id' => 'S003', 'quote' => 'At least 5 units are required.' ) ),
+	'must_preserve' => array( 'At least 5 units' ),
+);
+$editor_repair_strategy = $strategy;
+$editor_repair_strategy['hooks'][0]['fact_ids'] = array( 'F2' );
+$editor_repair_draft = array(
+	'text'          => 'Check the required quantity.',
+	'hook_angle_id' => 'H1',
+	'structure_id'  => 'reversal',
+	'fact_ids'      => array( 'F2' ),
+	'claims'        => array( array( 'text' => 'Check the required quantity.', 'fact_ids' => array( 'F2' ) ) ),
+);
+$editor_repair_copy = $editor_repair_draft;
+$editor_repair_copy['text'] = 'At least 5 units are required.';
+$editor_repair_copy['claims'][0]['text'] = $editor_repair_copy['text'];
+$editor_repair_queued = personal_cta_threads_queue_literal_repair( $editor_repair_post_id, $editor_repair_draft, 'editor', '', 'H1', 'reversal', array( 'At least 5 units' ) );
+$test_remote_responses = array( pct_openai_response( 'resp_editor_literal_context', $editor_repair_copy ) );
+$editor_repair_start   = count( $test_remote_requests );
+$editor_repair_result  = personal_cta_threads_run_literal_repair( $editor_repair_post_id, $editor_repair_fact_map, $editor_repair_strategy );
+pct_assert( is_array( $editor_repair_queued ) && ! empty( $editor_repair_queued['pending'] ) && is_array( $editor_repair_result ) && ! empty( $editor_repair_result['pending'] ), 'Editor literal repair must not require final standalone context before the quality stage.' );
+pct_assert( 1 === count( $test_remote_requests ) - $editor_repair_start && $editor_repair_copy === personal_cta_threads_meta( $editor_repair_post_id, 'editor_result' ) && array() === personal_cta_threads_meta( $editor_repair_post_id, 'literal_repair', array() ), 'A successful editor literal repair must store its checkpoint and clear the repair marker.' );
+$editor_final_contract = personal_cta_threads_validate_copy( $editor_repair_copy, $editor_repair_fact_map, $editor_repair_strategy, 'H1', 'reversal', true );
+pct_assert( is_wp_error( $editor_final_contract ) && 'pct_missing_context' === $editor_final_contract->get_error_code(), 'Standalone context must remain mandatory at final quality even when editor repair defers it.' );
+
 $quality_schema = personal_cta_threads_quality_schema();
 pct_assert( array( 'decision', 'issues', 'copy' ) === $quality_schema['required'] && in_array( 'generic_meta_cta', $quality_schema['properties']['issues']['items']['enum'], true ) && in_array( 'grounding_strengthened', $quality_schema['properties']['issues']['items']['enum'], true ), 'Final quality must return a bounded decision and catch wording stronger than its evidence.' );
 $pass_quality = array( 'decision' => 'pass', 'issues' => array(), 'copy' => $copy );

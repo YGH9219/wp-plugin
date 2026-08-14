@@ -75,6 +75,6 @@ docker run --rm --mount $mount -w /app php:7.4-cli sh -lc "find . -path ./dist -
 
 1. `personal-cta-blocks.php`, `blocks/pulse-button/block.json`, `blocks/pulse-button/editor.asset.php` 버전을 같은 값으로 올립니다.
 2. `main`에 커밋·푸시하고 CI를 확인합니다.
-3. 같은 버전의 태그를 푸시합니다. 예: `git tag v0.5.5` 후 `git push origin v0.5.5`.
+3. 같은 버전의 태그를 푸시합니다. 예: `git tag v0.5.6` 후 `git push origin v0.5.6`.
 
 태그가 푸시되면 GitHub Actions가 설치 가능한 `personal-cta-blocks-{version}.zip`을 만들고 GitHub Release에 올립니다. 플러그인 폴더명과 메인 파일명은 기존 자동 업데이트 호환성을 위해 변경하지 않습니다.

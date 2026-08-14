@@ -1403,7 +1403,7 @@ function personal_cta_threads_run_literal_repair( $post_id, $fact_map, $strategy
 	$after_ids  = array_fill_keys( array_map( 'strval', isset( $response['data']['fact_ids'] ) ? (array) $response['data']['fact_ids'] : array() ), true );
 	$valid      = ! empty( array_diff_key( $after_ids, $before_ids ) )
 		? new WP_Error( 'pct_invalid_copy', '최종 교열이 기존 후보에 없던 사실을 추가했습니다.' )
-		: personal_cta_threads_validate_copy( $response['data'], $fact_map, $strategy, $expected_hook, $expected_structure, 'writer' !== $target );
+		: personal_cta_threads_validate_copy( $response['data'], $fact_map, $strategy, $expected_hook, $expected_structure, in_array( $target, array( 'quality', 'repair' ), true ) );
 	if ( true === $valid && in_array( $target, array( 'quality', 'repair' ), true ) ) {
 		if ( ! empty( personal_cta_threads_local_quality_issues( $response['data'] ) ) ) {
 			$valid = new WP_Error( 'pct_quality_contract', '최종 교열이 약한 도입부 또는 메타 CTA를 다시 만들었습니다.' );
