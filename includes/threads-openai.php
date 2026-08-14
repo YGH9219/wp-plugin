@@ -9,7 +9,7 @@ define( 'PERSONAL_CTA_THREADS_FACT_PROMPT_VERSION', '5.2' );
 define( 'PERSONAL_CTA_THREADS_STRATEGY_PROMPT_VERSION', '1.1' );
 define( 'PERSONAL_CTA_THREADS_WRITER_PROMPT_VERSION', '9.1' );
 define( 'PERSONAL_CTA_THREADS_EDITOR_PROMPT_VERSION', '6.1' );
-define( 'PERSONAL_CTA_THREADS_QUALITY_PROMPT_VERSION', '2.1' );
+define( 'PERSONAL_CTA_THREADS_QUALITY_PROMPT_VERSION', '2.2' );
 define( 'PERSONAL_CTA_THREADS_VERIFIER_PROMPT_VERSION', '3.1' );
 define( 'PERSONAL_CTA_THREADS_REPAIR_PROMPT_VERSION', '2.1' );
 define( 'PERSONAL_CTA_THREADS_SCHEMA_VERSION', '3.1' );
@@ -581,17 +581,19 @@ function personal_cta_threads_copy_schema() {
 /**
  * Strict schema for the one bounded final style review and optional rewrite.
  *
+ * @param bool $force_rewrite Whether the candidate must be rewritten.
  * @return array<string, mixed>
  */
-function personal_cta_threads_quality_schema() {
+function personal_cta_threads_quality_schema( $force_rewrite = false ) {
 	return array(
 		'type'                 => 'object',
 		'additionalProperties' => false,
 		'required'             => array( 'decision', 'issues', 'copy' ),
 		'properties'           => array(
-			'decision' => array( 'type' => 'string', 'enum' => array( 'pass', 'rewrite' ) ),
+			'decision' => array( 'type' => 'string', 'enum' => $force_rewrite ? array( 'rewrite' ) : array( 'pass', 'rewrite' ) ),
 			'issues'   => array(
 				'type'     => 'array',
+				'minItems' => $force_rewrite ? 1 : 0,
 				'maxItems' => 8,
 				'items'    => array(
 					'type' => 'string',
@@ -604,6 +606,7 @@ function personal_cta_threads_quality_schema() {
 						'poor_rhythm',
 						'tone_mismatch',
 						'grounding_strengthened',
+						'missing_context',
 					),
 				),
 			),
@@ -782,9 +785,12 @@ function personal_cta_threads_quality_prompt() {
 - poor_rhythm: 비슷한 길이의 설명문이 이어져 피드 리듬이 없다.
 - tone_mismatch: 존댓말과 반말이 섞이거나 번역투다.
 - grounding_strengthened: 원문·FACT의 권고나 필요 작업을 금지·의무·최우선으로, 가능성을 확정으로 강화했다. 예를 들어 단순히 수거 전에 필요한 준비를 "첫 행동"이라 하거나, 먼저 확인하라는 조언을 "하지 마"라는 금지로 바꾸면 해당한다.
+- missing_context: 제목이나 링크 없이 첫 1~2문장만 읽으면 독자의 대상·상황·계기를 알 수 없거나, 서버가 지정한 missing_context_fact_ids가 빠졌다.
 
 문제가 없으면 decision=pass, issues=[]로 하고 copy를 candidate와 모든 필드까지 정확히 같게 돌려준다.
 문제가 있으면 decision=rewrite로 하고 해당 issues를 넣은 뒤 딱 한 번 새 copy를 쓴다. candidate의 hook_angle_id와 structure_id를 유지하고, candidate가 쓰지 않은 F ID는 새로 쓰지 않는다. 단, 첫 1~2문장의 독립 맥락에 필요한 fact_map.context_fact_ids가 candidate에 빠졌다면 그 ID만 추가해 복구할 수 있다. 새 사실·손실·혜택·인과·금지·우선순위를 만들지 말고 must_preserve를 지킨다. 첫 문장은 근거 있는 반전·선택·조건·질문·실수 방지 중 가장 강한 형태로, 마지막은 구체적 행동이나 판단으로 쓴다. 메타 CTA는 금지하며 link_included가 true면 끝에 👇만 붙일 수 있다. max_body_length 이내로 쓴다.
+
+required_issues는 서버가 이미 확인한 필수 문제다. 비어 있지 않으면 pass는 금지하고 decision=rewrite로 하며, required_issues를 issues에 모두 포함한다. missing_context_fact_ids가 있으면 그 F ID의 맥락을 첫 1~2문장에 자연스럽게 쓰고 copy.fact_ids와 claims에도 빠짐없이 연결한다.
 
 스키마 필드만 출력한다.
 PROMPT;
@@ -1299,14 +1305,15 @@ function personal_cta_threads_local_quality_issues( $copy ) {
 /**
  * Validates a small, bounded conversion-quality decision.
  *
- * @param array<string, mixed> $review Review result.
+ * @param array<string, mixed> $review          Review result.
+ * @param array<int,string>    $required_issues Server-required issues.
  * @return true|WP_Error
  */
-function personal_cta_threads_validate_quality_review( $review ) {
+function personal_cta_threads_validate_quality_review( $review, $required_issues = array() ) {
 	$decision = is_array( $review ) && isset( $review['decision'] ) ? (string) $review['decision'] : '';
 	$issues   = is_array( $review ) && isset( $review['issues'] ) && is_array( $review['issues'] ) ? $review['issues'] : null;
 	$allowed  = array_fill_keys(
-		array( 'administrative_voice', 'generic_meta_cta', 'emoji_lead', 'formulaic_structure', 'weak_hook', 'poor_rhythm', 'tone_mismatch', 'grounding_strengthened' ),
+		array( 'administrative_voice', 'generic_meta_cta', 'emoji_lead', 'formulaic_structure', 'weak_hook', 'poor_rhythm', 'tone_mismatch', 'grounding_strengthened', 'missing_context' ),
 		true
 	);
 
@@ -1324,6 +1331,11 @@ function personal_cta_threads_validate_quality_review( $review ) {
 
 	if ( ( 'pass' === $decision && ! empty( $issues ) ) || ( 'rewrite' === $decision && empty( $issues ) ) ) {
 		return new WP_Error( 'pct_invalid_quality_review', 'AI 전환력 심사 결론과 사유가 일치하지 않습니다.' );
+	}
+
+	$required_issues = array_values( array_unique( array_map( 'strval', (array) $required_issues ) ) );
+	if ( ! empty( $required_issues ) && ( 'rewrite' !== $decision || ! empty( array_diff( $required_issues, array_keys( $seen ) ) ) ) ) {
+		return new WP_Error( 'pct_invalid_quality_review', 'AI 전환력 심사가 필수 보정 사유를 반영하지 않았습니다.' );
 	}
 
 	return true;
@@ -1844,11 +1856,28 @@ function personal_cta_threads_generate( $post_id, $regenerate = false ) {
 		return personal_cta_threads_openai_pending( $post_id );
 	}
 
-	$quality_hash = hash( 'sha256', wp_json_encode( $editor ) );
+	$editor_fact_ids          = array_fill_keys( array_map( 'strval', (array) $editor['fact_ids'] ), true );
+	$missing_context_fact_ids = array();
+	foreach ( array_map( 'strval', (array) $fact_map['context_fact_ids'] ) as $context_fact_id ) {
+		if ( ! isset( $editor_fact_ids[ $context_fact_id ] ) ) {
+			$missing_context_fact_ids[] = $context_fact_id;
+		}
+	}
+	$required_quality_issues = empty( $missing_context_fact_ids ) ? array() : array( 'missing_context' );
+	$quality_hash            = hash(
+		'sha256',
+		wp_json_encode(
+			array(
+				'editor'                   => $editor,
+				'required_issues'          => $required_quality_issues,
+				'missing_context_fact_ids' => $missing_context_fact_ids,
+			)
+		)
+	);
 	$quality      = personal_cta_threads_meta( $post_id, 'final_quality_result', array() );
 	$quality_ok   = is_array( $quality )
 		&& hash_equals( $quality_hash, (string) personal_cta_threads_meta( $post_id, 'quality_input_hash' ) )
-		&& true === personal_cta_threads_validate_quality_review( $quality )
+		&& true === personal_cta_threads_validate_quality_review( $quality, $required_quality_issues )
 		&& true === personal_cta_threads_validate_copy( $quality['copy'], $fact_map, $strategy, '', '', true )
 		&& empty( personal_cta_threads_local_quality_issues( $quality['copy'] ) );
 	if ( ! $quality_ok ) {
@@ -1858,13 +1887,13 @@ function personal_cta_threads_generate( $post_id, $regenerate = false ) {
 			$post_id,
 			'quality',
 			personal_cta_threads_quality_prompt(),
-			array( 'fact_map' => $fact_map, 'strategy' => $strategy, 'candidate' => $editor, 'max_body_length' => personal_cta_threads_body_limit( $post_id ), 'link_included' => $link_included ),
-			personal_cta_threads_quality_schema()
+			array( 'fact_map' => $fact_map, 'strategy' => $strategy, 'candidate' => $editor, 'required_issues' => $required_quality_issues, 'missing_context_fact_ids' => $missing_context_fact_ids, 'max_body_length' => personal_cta_threads_body_limit( $post_id ), 'link_included' => $link_included ),
+			personal_cta_threads_quality_schema( ! empty( $required_quality_issues ) )
 		);
 		if ( is_wp_error( $response ) ) {
 			return $response;
 		}
-		$valid = personal_cta_threads_validate_quality_review( $response['data'] );
+		$valid = personal_cta_threads_validate_quality_review( $response['data'], $required_quality_issues );
 		if ( true === $valid && 'pass' === $response['data']['decision'] && wp_json_encode( $response['data']['copy'] ) !== wp_json_encode( $editor ) ) {
 			$valid = new WP_Error( 'pct_invalid_quality_review', '통과 판정이 원문 후보를 조용히 변경했습니다.' );
 		}

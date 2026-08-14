@@ -438,9 +438,12 @@ $editor_final_contract = personal_cta_threads_validate_copy( $editor_repair_copy
 pct_assert( is_wp_error( $editor_final_contract ) && 'pct_missing_context' === $editor_final_contract->get_error_code(), 'Standalone context must remain mandatory at final quality even when editor repair defers it.' );
 
 $quality_schema = personal_cta_threads_quality_schema();
-pct_assert( array( 'decision', 'issues', 'copy' ) === $quality_schema['required'] && in_array( 'generic_meta_cta', $quality_schema['properties']['issues']['items']['enum'], true ) && in_array( 'grounding_strengthened', $quality_schema['properties']['issues']['items']['enum'], true ), 'Final quality must return a bounded decision and catch wording stronger than its evidence.' );
+pct_assert( array( 'decision', 'issues', 'copy' ) === $quality_schema['required'] && in_array( 'generic_meta_cta', $quality_schema['properties']['issues']['items']['enum'], true ) && in_array( 'grounding_strengthened', $quality_schema['properties']['issues']['items']['enum'], true ) && in_array( 'missing_context', $quality_schema['properties']['issues']['items']['enum'], true ), 'Final quality must return a bounded decision and catch wording stronger than its evidence.' );
+$forced_quality_schema = personal_cta_threads_quality_schema( true );
+pct_assert( array( 'rewrite' ) === $forced_quality_schema['properties']['decision']['enum'] && 1 === $forced_quality_schema['properties']['issues']['minItems'], 'A server-detected context gap must make rewrite the only valid quality decision.' );
 $pass_quality = array( 'decision' => 'pass', 'issues' => array(), 'copy' => $copy );
 pct_assert( true === personal_cta_threads_validate_quality_review( $pass_quality ), 'A pass with unchanged copy and no issues must validate.' );
+pct_assert( is_wp_error( personal_cta_threads_validate_quality_review( $pass_quality, array( 'missing_context' ) ) ), 'A pass may not ignore a server-required context rewrite.' );
 $rewrite_copy         = $copy;
 $rewrite_copy['text'] = '첫 문단을 지금 확인해야 해.';
 $rewrite_quality      = array( 'decision' => 'rewrite', 'issues' => array( 'poor_rhythm' ), 'copy' => $rewrite_copy );
@@ -516,6 +519,49 @@ foreach ( $normal_requests as $request ) {
 	}
 }
 pct_assert( array( 'threads_fact', 'threads_strategy', 'threads_writer', 'threads_writer', 'threads_writer', 'threads_editor', 'threads_quality', 'threads_verifier' ) === $request_stages, 'The v0.5 request order is invalid.' );
+
+/* Final quality must receive an explicit, no-retry contract when editor context is missing. */
+$context_quality_post_id  = 33;
+$context_quality_fact_map = $fact_map;
+$context_quality_fact_map['facts'][] = array(
+	'id'            => 'F2',
+	'subject'       => '글의 대상',
+	'statement'     => '테스트 글',
+	'evidence'      => array( array( 'source_id' => 'S001', 'quote' => '테스트 글' ) ),
+	'must_preserve' => array(),
+);
+$context_quality_strategy                         = $strategy;
+$context_quality_strategy['hooks'][0]['fact_ids'] = array( 'F1', 'F2' );
+$context_missing_editor = array(
+	'text'          => '테스트 글의 대상을 구분해야 해.',
+	'hook_angle_id' => 'H1',
+	'structure_id'  => 'reversal',
+	'fact_ids'      => array( 'F2' ),
+	'claims'        => array( array( 'text' => '테스트 글의 대상을 구분해야 해.', 'fact_ids' => array( 'F2' ) ) ),
+);
+$context_error = personal_cta_threads_validate_copy( $context_missing_editor, $context_quality_fact_map, $context_quality_strategy, '', '', true );
+pct_assert( is_wp_error( $context_error ) && 'pct_missing_context' === $context_error->get_error_code(), 'The context-quality fixture must reproduce the final missing-context condition.' );
+
+$context_quality_copy   = pct_copy( 'H1', 'reversal' );
+$context_quality_review = array( 'decision' => 'rewrite', 'issues' => array( 'missing_context' ), 'copy' => $context_quality_copy );
+$test_remote_responses  = pct_pipeline_responses( $context_quality_post_id, $context_quality_fact_map, $context_quality_strategy, $context_missing_editor, $context_quality_review, pct_verifier_result( $context_quality_copy['text'], true ) );
+$context_quality_start  = count( $test_remote_requests );
+$context_quality_result = pct_drive_generation( $context_quality_post_id );
+$context_quality_requests = array_slice( $test_remote_requests, $context_quality_start );
+$context_quality_input    = array();
+foreach ( $context_quality_requests as $request ) {
+	$request_payload = json_decode( $request['args']['body'], true );
+	if ( 'threads_quality' !== $request_payload['text']['format']['name'] ) {
+		continue;
+	}
+	$user_text             = $request_payload['input'][1]['content'][0]['text'];
+	$json_offset           = strpos( $user_text, "\n" );
+	$context_quality_input = false === $json_offset ? array() : json_decode( substr( $user_text, $json_offset + 1 ), true );
+	break;
+}
+pct_assert( array( 'missing_context' ) === ( isset( $context_quality_input['required_issues'] ) ? $context_quality_input['required_issues'] : array() ) && array( 'F1' ) === ( isset( $context_quality_input['missing_context_fact_ids'] ) ? $context_quality_input['missing_context_fact_ids'] : array() ), 'Final quality must be explicitly required to rewrite the missing standalone context.' );
+pct_assert( is_array( $context_quality_result ) && empty( $context_quality_result['pending'] ) && 'ready' === personal_cta_threads_meta( $context_quality_post_id, 'status' ) && $context_quality_copy === personal_cta_threads_meta( $context_quality_post_id, 'final_copy', array() ), 'A required missing-context rewrite must reach ready with the corrected copy.' );
+pct_assert( 8 === count( $context_quality_requests ) && 8 === (int) personal_cta_threads_meta( $context_quality_post_id, 'call_count' ) && 'rewrite' === personal_cta_threads_meta( $context_quality_post_id, 'final_quality_result', array() )['decision'], 'A required context rewrite must stay within the normal eight-call pipeline with no retry.' );
 
 /* One invalid literal-preservation result receives one FACT-only recovery. */
 $fact_retry_post_id = 25;
