@@ -1650,7 +1650,9 @@ function personal_cta_threads_generate( $post_id, $regenerate = false ) {
 	$status        = (string) personal_cta_threads_meta( $post_id, 'status' );
 	$existing_text = (string) personal_cta_threads_meta( $post_id, 'final_text' );
 	$existing_copy = personal_cta_threads_meta( $post_id, 'final_copy', array() );
-	$existing_ok   = ! $regenerate
+	$verifier_state = (string) personal_cta_threads_meta( $post_id, 'verifier_state' );
+	$existing_ok    = ! $regenerate
+		&& 'blocked' !== $verifier_state
 		&& '' !== $existing_text
 		&& hash_equals( $source['hash'], (string) personal_cta_threads_meta( $post_id, 'source_hash' ) )
 		&& '' !== $saved_key && hash_equals( $run_key, $saved_key )
@@ -1659,9 +1661,6 @@ function personal_cta_threads_generate( $post_id, $regenerate = false ) {
 		&& hash_equals( hash( 'sha256', $existing_text ), hash( 'sha256', (string) $existing_copy['text'] ) )
 		&& $fact_ok;
 	if ( $existing_ok ) {
-		if ( 'blocked' === (string) personal_cta_threads_meta( $post_id, 'verifier_state' ) ) {
-			return new WP_Error( 'pct_verifier_blocked', '독립 사실 검증에서 원문 근거가 부족하거나 왜곡된 문장이 발견됐습니다. 다시 생성하세요.' );
-		}
 		personal_cta_threads_set_state( $post_id, 'editing', 'verifier' );
 		$verified = personal_cta_threads_verify( $post_id, $existing_text );
 		if ( is_wp_error( $verified ) ) {
@@ -1681,9 +1680,10 @@ function personal_cta_threads_generate( $post_id, $regenerate = false ) {
 		personal_cta_threads_set_meta( $post_id, 'drafts', array() );
 		personal_cta_threads_set_meta( $post_id, 'usage', array() );
 		personal_cta_threads_set_meta( $post_id, 'call_count', 0 );
-		foreach ( array( 'draft_order', 'editor_result', 'editor_response_id', 'editor_output_retry', 'fact_validation_retry', 'final_quality_result', 'quality_input_hash', 'quality_response_id', 'repair_result', 'repair_response_id', 'literal_repair', 'transport_retry' ) as $key ) {
+		foreach ( array( 'ai_original', 'draft_order', 'editor_result', 'editor_response_id', 'editor_output_retry', 'fact_validation_retry', 'final_copy', 'final_quality_result', 'final_text', 'quality_input_hash', 'quality_response_id', 'repair_result', 'repair_response_id', 'source_hash', 'text_hash', 'literal_repair', 'transport_retry', 'verifier_cache_key', 'verifier_candidate_key', 'verifier_hash', 'verifier_result', 'verifier_response_id' ) as $key ) {
 			delete_post_meta( $post_id, '_pct_threads_' . $key );
 		}
+		personal_cta_threads_set_meta( $post_id, 'verifier_state', 'not_run' );
 	}
 
 	if ( ! $fact_ok ) {

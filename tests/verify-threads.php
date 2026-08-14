@@ -524,6 +524,16 @@ $reuse_start = count( $test_remote_requests );
 $reused      = personal_cta_threads_generate( $normal_post_id, false );
 pct_assert( is_array( $reused ) && ! empty( $reused['reused'] ) && $reuse_start === count( $test_remote_requests ), 'A passed verifier result must be reused without another provider call.' );
 
+/* A transient verifier failure must retry only verification, not the creative pipeline. */
+personal_cta_threads_set_meta( $normal_post_id, 'verifier_state', 'failed' );
+personal_cta_threads_set_state( $normal_post_id, 'failed', 'verifier', 'temporary verifier failure' );
+$test_remote_responses = array( pct_openai_response( 'resp_' . $normal_post_id . '_verifier_retry', pct_verifier_result( $normal_editor['text'], true ) ) );
+$verifier_retry_start  = count( $test_remote_requests );
+$verifier_retry        = personal_cta_threads_generate( $normal_post_id, false );
+$verifier_retry_requests = array_slice( $test_remote_requests, $verifier_retry_start );
+$verifier_retry_payload  = isset( $verifier_retry_requests[0]['args']['body'] ) ? json_decode( $verifier_retry_requests[0]['args']['body'], true ) : array();
+pct_assert( is_array( $verifier_retry ) && ! empty( $verifier_retry['reused'] ) && 1 === count( $verifier_retry_requests ) && 'threads_verifier' === $verifier_retry_payload['text']['format']['name'], 'A transient verifier failure must retry exactly one verifier call without regenerating Writer drafts.' );
+
 /* A reusable copy must not bypass recovery from an invalid saved FACT MAP. */
 $invalid_cache_post_id  = 24;
 $invalid_cache_source   = personal_cta_threads_source( $invalid_cache_post_id );
@@ -578,6 +588,16 @@ pct_assert( is_wp_error( $blocked_result ) && 'pct_verifier_blocked' === $blocke
 pct_assert( 'ready' !== personal_cta_threads_meta( $blocked_post_id, 'status' ) && 8 === count( $test_remote_requests ) - $blocked_start, 'A blocked verifier must not expose a ready generation.' );
 $blocked_diagnostics = personal_cta_threads_admin_diagnostics( $blocked_post_id );
 pct_assert( 'blocked' === $blocked_diagnostics['verifier']['state'] && 'unsupported' === $blocked_diagnostics['verifier']['checks'][0]['verdict'] && 'not supported' === $blocked_diagnostics['verifier']['checks'][0]['reason'], 'Blocked diagnostics must retain the exact safe verifier verdict and reason.' );
+
+/* A blocked candidate must start a fresh creative run instead of hijacking Writer A. */
+personal_cta_threads_set_state( $blocked_post_id, 'failed', 'verifier', 'blocked' );
+$test_remote_responses = array( pct_openai_response( 'resp_' . $blocked_post_id . '_restart_writer_a', pct_copy( 'H1', 'reversal' ) ) );
+$blocked_restart_start = count( $test_remote_requests );
+$blocked_restart       = personal_cta_threads_generate( $blocked_post_id, false );
+$blocked_restart_requests = array_slice( $test_remote_requests, $blocked_restart_start );
+$blocked_restart_payload  = isset( $blocked_restart_requests[0]['args']['body'] ) ? json_decode( $blocked_restart_requests[0]['args']['body'], true ) : array();
+pct_assert( is_array( $blocked_restart ) && ! empty( $blocked_restart['pending'] ) && 1 === count( $blocked_restart_requests ) && 'threads_writer' === $blocked_restart_payload['text']['format']['name'], 'A blocked verifier result must restart at Writer A instead of being returned as a Writer error.' );
+pct_assert( 'not_run' === personal_cta_threads_meta( $blocked_post_id, 'verifier_state' ) && '' === personal_cta_threads_meta( $blocked_post_id, 'final_text' ) && array() === personal_cta_threads_meta( $blocked_post_id, 'final_copy', array() ), 'A fresh run must clear the previous final candidate and verifier state.' );
 
 /* Repairs and retries cannot exceed the per-generation provider-call ceiling. */
 $cap_post_id = 23;
