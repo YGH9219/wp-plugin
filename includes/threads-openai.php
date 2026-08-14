@@ -9,7 +9,7 @@ define( 'PERSONAL_CTA_THREADS_FACT_PROMPT_VERSION', '5.2' );
 define( 'PERSONAL_CTA_THREADS_STRATEGY_PROMPT_VERSION', '1.1' );
 define( 'PERSONAL_CTA_THREADS_WRITER_PROMPT_VERSION', '9.1' );
 define( 'PERSONAL_CTA_THREADS_EDITOR_PROMPT_VERSION', '6.1' );
-define( 'PERSONAL_CTA_THREADS_QUALITY_PROMPT_VERSION', '2.2' );
+define( 'PERSONAL_CTA_THREADS_QUALITY_PROMPT_VERSION', '2.3' );
 define( 'PERSONAL_CTA_THREADS_VERIFIER_PROMPT_VERSION', '3.1' );
 define( 'PERSONAL_CTA_THREADS_REPAIR_PROMPT_VERSION', '2.1' );
 define( 'PERSONAL_CTA_THREADS_SCHEMA_VERSION', '3.1' );
@@ -594,10 +594,10 @@ function personal_cta_threads_quality_schema( $force_rewrite = false ) {
 			'issues'   => array(
 				'type'     => 'array',
 				'minItems' => $force_rewrite ? 1 : 0,
-				'maxItems' => 8,
+				'maxItems' => $force_rewrite ? 1 : 8,
 				'items'    => array(
 					'type' => 'string',
-					'enum' => array(
+					'enum' => $force_rewrite ? array( 'missing_context' ) : array(
 						'administrative_voice',
 						'generic_meta_cta',
 						'emoji_lead',
@@ -791,6 +791,7 @@ function personal_cta_threads_quality_prompt() {
 문제가 있으면 decision=rewrite로 하고 해당 issues를 넣은 뒤 딱 한 번 새 copy를 쓴다. candidate의 hook_angle_id와 structure_id를 유지하고, candidate가 쓰지 않은 F ID는 새로 쓰지 않는다. 단, 첫 1~2문장의 독립 맥락에 필요한 fact_map.context_fact_ids가 candidate에 빠졌다면 그 ID만 추가해 복구할 수 있다. 새 사실·손실·혜택·인과·금지·우선순위를 만들지 말고 must_preserve를 지킨다. 첫 문장은 근거 있는 반전·선택·조건·질문·실수 방지 중 가장 강한 형태로, 마지막은 구체적 행동이나 판단으로 쓴다. 메타 CTA는 금지하며 link_included가 true면 끝에 👇만 붙일 수 있다. max_body_length 이내로 쓴다.
 
 required_issues는 서버가 이미 확인한 필수 문제다. 비어 있지 않으면 pass는 금지하고 decision=rewrite로 하며, required_issues를 issues에 모두 포함한다. missing_context_fact_ids가 있으면 그 F ID의 맥락을 첫 1~2문장에 자연스럽게 쓰고 copy.fact_ids와 claims에도 빠짐없이 연결한다.
+missing_context_fact_ids가 비어 있지 않으면 issues는 ["missing_context"]만 반환하고, 발견한 다른 스타일 문제는 라벨을 추가하지 말고 같은 copy에서 함께 고친다.
 
 스키마 필드만 출력한다.
 PROMPT;

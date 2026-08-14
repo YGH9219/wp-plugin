@@ -3,7 +3,7 @@
  * Plugin Name: Personal CTA Blocks
  * Plugin URI: https://github.com/YGH9219/wp-plugin
  * Description: 펄스 CTA 버튼과 WordPress 글의 AI Threads 문구 생성을 제공합니다.
- * Version: 0.5.7
+ * Version: 0.5.8
  * Requires at least: 6.3
  * Requires PHP: 7.4
  * Update URI: https://github.com/YGH9219/wp-plugin
@@ -12,7 +12,7 @@
 
 defined( 'ABSPATH' ) || exit;
 
-define( 'PERSONAL_CTA_BLOCKS_VERSION', '0.5.7' );
+define( 'PERSONAL_CTA_BLOCKS_VERSION', '0.5.8' );
 define( 'PERSONAL_CTA_BLOCKS_FILE', __FILE__ );
 define( 'PERSONAL_CTA_BLOCKS_DIR', __DIR__ );
 define( 'PERSONAL_CTA_BLOCKS_URL', plugin_dir_url( __FILE__ ) );
