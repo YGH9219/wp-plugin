@@ -354,6 +354,77 @@ function personal_cta_threads_disconnect() {
 	wp_unschedule_hook( PERSONAL_CTA_THREADS_REFRESH_HOOK );
 }
 
+/** Decodes one URL-safe base64 value from a Meta signed request. */
+function personal_cta_threads_base64url_decode( $value ) {
+	$value = strtr( (string) $value, '-_', '+/' );
+	$value .= str_repeat( '=', ( 4 - strlen( $value ) % 4 ) % 4 );
+
+	return base64_decode( $value, true );
+}
+
+/**
+ * Authenticates and returns a Meta callback signed_request payload.
+ *
+ * @param string $signed_request Meta signed request.
+ * @return array<string, mixed>|WP_Error
+ */
+function personal_cta_threads_parse_signed_request( $signed_request ) {
+	$secret = personal_cta_threads_app_secret();
+	$parts  = explode( '.', trim( (string) $signed_request ), 2 );
+	if ( is_wp_error( $secret ) || '' === $secret || 2 !== count( $parts ) ) {
+		return new WP_Error( 'pct_meta_signed_request_invalid', 'Meta 콜백 서명을 확인할 수 없습니다.' );
+	}
+	$signature = personal_cta_threads_base64url_decode( $parts[0] );
+	$raw       = personal_cta_threads_base64url_decode( $parts[1] );
+	$payload   = false !== $raw ? json_decode( $raw, true ) : null;
+	$expected  = false !== $raw ? hash_hmac( 'sha256', $raw, $secret, true ) : '';
+	if ( false === $signature || ! is_array( $payload ) || ! hash_equals( $expected, $signature ) || 'HMAC-SHA256' !== strtoupper( (string) ( $payload['algorithm'] ?? '' ) ) ) {
+		return new WP_Error( 'pct_meta_signed_request_invalid', 'Meta 콜백 서명이 올바르지 않습니다.' );
+	}
+	$user_id = isset( $payload['user_id'] ) ? (string) $payload['user_id'] : (string) ( $payload['sub'] ?? '' );
+	if ( ! preg_match( '/^\d{1,32}$/', $user_id ) ) {
+		return new WP_Error( 'pct_meta_signed_request_invalid', 'Meta 콜백 사용자 정보가 올바르지 않습니다.' );
+	}
+	$payload['user_id'] = $user_id;
+
+	return $payload;
+}
+
+/**
+ * Applies an authenticated Meta removal or data-deletion callback.
+ *
+ * @param string $signed_request Meta signed request.
+ * @param bool   $delete_data Whether to delete daily history and pending items.
+ * @return array<string, mixed>|WP_Error
+ */
+function personal_cta_threads_process_account_callback( $signed_request, $delete_data = false ) {
+	$payload = personal_cta_threads_parse_signed_request( $signed_request );
+	if ( is_wp_error( $payload ) ) {
+		return $payload;
+	}
+	$account = personal_cta_threads_saved_account();
+	if ( ! empty( $account['user_id'] ) && ! hash_equals( (string) $account['user_id'], (string) $payload['user_id'] ) ) {
+		return new WP_Error( 'pct_meta_callback_user_mismatch', 'Meta 콜백 사용자와 연결된 Threads 계정이 다릅니다.' );
+	}
+
+	personal_cta_threads_disconnect();
+	$settings = get_option( PERSONAL_CTA_THREADS_SETTINGS_OPTION, array() );
+	if ( is_array( $settings ) ) {
+		$settings['daily_enabled'] = false;
+		update_option( PERSONAL_CTA_THREADS_SETTINGS_OPTION, $settings, false );
+	}
+	if ( defined( 'PERSONAL_CTA_THREADS_DAILY_PLANNER_HOOK' ) ) {
+		wp_unschedule_hook( PERSONAL_CTA_THREADS_DAILY_PLANNER_HOOK );
+		wp_unschedule_hook( PERSONAL_CTA_THREADS_DAILY_PUBLISH_HOOK );
+	}
+	if ( $delete_data ) {
+		delete_option( PERSONAL_CTA_THREADS_DAILY_STATE_OPTION );
+		delete_option( PERSONAL_CTA_THREADS_DAILY_HISTORY_OPTION );
+	}
+
+	return $payload;
+}
+
 /** Refreshes a saved long-lived token when due. */
 function personal_cta_threads_refresh_token() {
 	$account = personal_cta_threads_saved_account();

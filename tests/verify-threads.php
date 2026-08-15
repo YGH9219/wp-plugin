@@ -21,6 +21,7 @@ $test_meta_requests    = array();
 $test_scheduled_events = array();
 $test_permalink        = '';
 $test_post_title       = '테스트 글';
+$test_timezone_name    = 'Asia/Seoul';
 
 class Pct_Test_WPDB {
 	public $options = 'options';
@@ -171,7 +172,10 @@ function wp_remote_request( $url, $args = array() ) {
 }
 function wp_remote_retrieve_body( $response ) { return isset( $response['body'] ) ? $response['body'] : ''; }
 function wp_remote_retrieve_response_code( $response ) { return isset( $response['response']['code'] ) ? (int) $response['response']['code'] : 0; }
-function wp_timezone() { return new DateTimeZone( 'Asia/Seoul' ); }
+function wp_timezone() {
+	global $test_timezone_name;
+	return new DateTimeZone( $test_timezone_name );
+}
 function wp_timezone_string() { return 'Asia/Seoul'; }
 function wp_date( $format, $timestamp = null ) {
 	$date = new DateTimeImmutable( '@' . ( null === $timestamp ? time() : (int) $timestamp ) );
@@ -214,6 +218,13 @@ function pct_openai_response( $id, $data ) {
 
 function pct_meta_response( $data, $status = 200 ) {
 	return array( 'response' => array( 'code' => $status ), 'body' => wp_json_encode( $data ) );
+}
+
+function pct_meta_signed_request( $user_id, $secret ) {
+	$payload = wp_json_encode( array( 'algorithm' => 'HMAC-SHA256', 'user_id' => (string) $user_id, 'issued_at' => time() ) );
+	$encode  = function ( $value ) { return rtrim( strtr( base64_encode( $value ), '+/', '-_' ), '=' ); };
+
+	return $encode( hash_hmac( 'sha256', $payload, $secret, true ) ) . '.' . $encode( $payload );
 }
 
 function pct_copy( $hook_id, $structure_id, $text = '테스트 글은 첫 문단부터 확인해야 해.' ) {
@@ -933,11 +944,33 @@ $test_meta_responses = array(
 	pct_meta_response( array( 'id' => 'daily-media-1' ) ),
 	pct_meta_response( array( 'id' => 'daily-media-1', 'permalink' => 'https://www.threads.com/@today_lifetip/post/daily1' ) ),
 );
+global $test_timezone_name;
+$test_timezone_name = sprintf( '%+03d:00', 12 - (int) gmdate( 'G' ) );
 personal_cta_threads_publish_daily_post( $daily_item_id );
 personal_cta_threads_publish_daily_post( $daily_item_id );
+$test_timezone_name = 'Asia/Seoul';
 $daily_state = get_option( PERSONAL_CTA_THREADS_DAILY_STATE_OPTION, array() );
 pct_assert( 'published' === $daily_state['items'][0]['status'] && 'daily-media-1' === $daily_state['items'][0]['remote_id'], 'A scheduled daily post must persist its two-step Meta publish result.' );
 pct_assert( 1 === count( personal_cta_threads_daily_history() ), 'A published daily post must enter the bounded recent-post history.' );
+
+/* Meta removal callbacks must authenticate the signed request and stop automation. */
+$signed_request = pct_meta_signed_request( '123456789', 'test-meta-app-secret' );
+$parsed_request = personal_cta_threads_parse_signed_request( $signed_request );
+pct_assert( is_array( $parsed_request ) && '123456789' === $parsed_request['user_id'], 'A valid Meta signed_request must be authenticated.' );
+pct_assert( is_wp_error( personal_cta_threads_parse_signed_request( $signed_request . 'tampered' ) ), 'A tampered Meta signed_request must be rejected.' );
+$callback_settings = personal_cta_threads_settings();
+$callback_settings['daily_enabled'] = true;
+update_option( PERSONAL_CTA_THREADS_SETTINGS_OPTION, $callback_settings );
+$test_scheduled_events[] = array( 'timestamp' => time() + 60, 'hook' => PERSONAL_CTA_THREADS_DAILY_PLANNER_HOOK, 'args' => array(), 'recurrence' => '' );
+$removed = personal_cta_threads_process_account_callback( $signed_request, false );
+pct_assert( is_array( $removed ) && false === get_option( PERSONAL_CTA_THREADS_ACCOUNT_OPTION, false ), 'A valid removal callback must disconnect the matching Threads account.' );
+pct_assert( empty( personal_cta_threads_settings()['daily_enabled'] ) && false === wp_next_scheduled( PERSONAL_CTA_THREADS_DAILY_PLANNER_HOOK ), 'A removal callback must disable and unschedule daily posting.' );
+
+personal_cta_threads_save_account( array( 'user_id' => '123456789' ) );
+update_option( PERSONAL_CTA_THREADS_DAILY_STATE_OPTION, array( 'items' => array( array( 'text' => 'pending' ) ) ) );
+update_option( PERSONAL_CTA_THREADS_DAILY_HISTORY_OPTION, array( array( 'text' => 'published' ) ) );
+$deleted = personal_cta_threads_process_account_callback( $signed_request, true );
+pct_assert( is_array( $deleted ) && false === get_option( PERSONAL_CTA_THREADS_DAILY_STATE_OPTION, false ) && false === get_option( PERSONAL_CTA_THREADS_DAILY_HISTORY_OPTION, false ), 'A valid data-deletion callback must remove pending and historical daily content.' );
 }
 
 echo "Threads generation, Meta publishing, and daily scheduling safeguards are valid.\n";

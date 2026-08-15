@@ -151,6 +151,56 @@ function personal_cta_threads_oauth_redirect_uri() {
 	return admin_url( 'admin-post.php?action=personal_cta_threads_oauth_callback' );
 }
 
+/** Returns Meta's public app-removal callback URI. */
+function personal_cta_threads_deauthorize_uri() {
+	return admin_url( 'admin-post.php?action=personal_cta_threads_deauthorize' );
+}
+
+/** Returns Meta's public data-deletion callback URI. */
+function personal_cta_threads_data_deletion_uri() {
+	return admin_url( 'admin-post.php?action=personal_cta_threads_data_deletion' );
+}
+
+/** Reads the signed_request posted by Meta. */
+function personal_cta_threads_meta_signed_request_input() {
+	return isset( $_POST['signed_request'] ) && is_string( $_POST['signed_request'] )
+		? trim( (string) wp_unslash( $_POST['signed_request'] ) )
+		: '';
+}
+
+/** Handles Meta app removal for both logged-in and anonymous callbacks. */
+function personal_cta_threads_handle_deauthorize() {
+	$result = personal_cta_threads_process_account_callback( personal_cta_threads_meta_signed_request_input(), false );
+	wp_send_json( array( 'success' => ! is_wp_error( $result ) ), is_wp_error( $result ) ? 400 : 200 );
+}
+add_action( 'admin_post_personal_cta_threads_deauthorize', 'personal_cta_threads_handle_deauthorize' );
+add_action( 'admin_post_nopriv_personal_cta_threads_deauthorize', 'personal_cta_threads_handle_deauthorize' );
+
+/** Handles Meta data deletion and returns its required status URL and code. */
+function personal_cta_threads_handle_data_deletion() {
+	$result = personal_cta_threads_process_account_callback( personal_cta_threads_meta_signed_request_input(), true );
+	if ( is_wp_error( $result ) ) {
+		wp_send_json( array( 'success' => false ), 400 );
+	}
+	$code = bin2hex( random_bytes( 16 ) );
+	set_transient( 'pct_threads_deletion_' . hash( 'sha256', $code ), true, 7 * DAY_IN_SECONDS );
+	wp_send_json( array(
+		'url'               => add_query_arg( array( 'action' => 'personal_cta_threads_data_deletion_status', 'code' => $code ), admin_url( 'admin-post.php' ) ),
+		'confirmation_code' => $code,
+	) );
+}
+add_action( 'admin_post_personal_cta_threads_data_deletion', 'personal_cta_threads_handle_data_deletion' );
+add_action( 'admin_post_nopriv_personal_cta_threads_data_deletion', 'personal_cta_threads_handle_data_deletion' );
+
+/** Returns the public completion status for one deletion confirmation code. */
+function personal_cta_threads_handle_data_deletion_status() {
+	$code = isset( $_GET['code'] ) ? sanitize_key( wp_unslash( (string) $_GET['code'] ) ) : '';
+	$done = 32 === strlen( $code ) && false !== get_transient( 'pct_threads_deletion_' . hash( 'sha256', $code ) );
+	wp_send_json( array( 'status' => $done ? 'complete' : 'not_found' ), $done ? 200 : 404 );
+}
+add_action( 'admin_post_personal_cta_threads_data_deletion_status', 'personal_cta_threads_handle_data_deletion_status' );
+add_action( 'admin_post_nopriv_personal_cta_threads_data_deletion_status', 'personal_cta_threads_handle_data_deletion_status' );
+
 /** Starts the administrator-only Threads OAuth flow. */
 function personal_cta_threads_start_oauth() {
 	if ( ! current_user_can( 'manage_options' ) ) {
@@ -319,8 +369,10 @@ function personal_cta_threads_render_settings_page() {
 					<td>
 						<?php personal_cta_threads_admin_status_badge( $app_ready ); ?>
 						<p><input name="<?php echo esc_attr( PERSONAL_CTA_THREADS_SETTINGS_OPTION ); ?>[meta_app_secret]" type="password" class="regular-text" autocomplete="new-password" spellcheck="false" placeholder="<?php echo esc_attr( $stored_secret ? '•••••••• (새 값 입력 시 교체)' : 'App Secret' ); ?>"></p>
-						<p class="description">다시 표시하지 않고 WordPress 보안 키로 암호화해 저장합니다. OAuth 리디렉션 URI는 Meta 앱에 아래 주소 그대로 등록하세요.</p>
-						<p><code><?php echo esc_html( personal_cta_threads_oauth_redirect_uri() ); ?></code></p>
+						<p class="description">다시 표시하지 않고 WordPress 보안 키로 암호화해 저장합니다. Meta 앱 설정에 아래 주소를 각각 그대로 등록하세요.</p>
+						<p>리디렉션 콜백 URL<br><code><?php echo esc_html( personal_cta_threads_oauth_redirect_uri() ); ?></code></p>
+						<p>제거 콜백 URL<br><code><?php echo esc_html( personal_cta_threads_deauthorize_uri() ); ?></code></p>
+						<p>삭제 콜백 URL<br><code><?php echo esc_html( personal_cta_threads_data_deletion_uri() ); ?></code></p>
 						<?php if ( $stored_secret ) : ?><p><label><input type="checkbox" name="<?php echo esc_attr( PERSONAL_CTA_THREADS_SETTINGS_OPTION ); ?>[delete_meta_app_secret]" value="1"> 저장된 App Secret 삭제</label></p><?php endif; ?>
 						<?php if ( '' !== $app_secret ) : ?><p class="description"><code>wp-config.php</code> 또는 환경변수의 App Secret이 우선 적용됩니다.</p><?php endif; ?>
 					</td>

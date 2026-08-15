@@ -37,7 +37,7 @@ define( 'PERSONAL_CTA_OPENAI_API_KEY', '...');
 
 ## Threads 계정 연결과 자동 게시
 
-`설정 → Threads 문구`에서 Threads App ID와 App Secret을 저장한 뒤 `Meta에서 Threads 계정 연결`을 누릅니다. Meta 앱에는 설정 화면에 표시된 OAuth 리디렉션 URI를 한 글자도 바꾸지 않고 등록해야 합니다. 이미 장기 액세스 토큰과 Threads 사용자 ID가 있다면 같은 화면의 직접 연결 입력란도 사용할 수 있습니다.
+`설정 → Threads 문구`에서 Threads App ID와 App Secret을 저장한 뒤 `Meta에서 Threads 계정 연결`을 누릅니다. Meta 앱에는 설정 화면에 표시된 리디렉션·제거·삭제 콜백 URI를 각각 한 글자도 바꾸지 않고 등록해야 합니다. 제거·삭제 요청은 Meta의 `signed_request` 서명을 확인한 뒤 계정 연결과 예약 데이터를 정리합니다. 이미 장기 액세스 토큰과 Threads 사용자 ID가 있다면 같은 화면의 직접 연결 입력란도 사용할 수 있습니다.
 
 App Secret과 액세스 토큰은 다시 표시하지 않으며 WordPress 보안 키로 AES-256-GCM 암호화해 비자동로드 옵션에 저장합니다. 예전 버전의 `PERSONAL_CTA_THREADS_MASTER_KEY`로 저장된 계정 토큰은 처음 사용할 때 현재 암호화 방식으로 자동 이전합니다.
 
@@ -105,6 +105,6 @@ docker run --rm --mount $mount -w /app php:7.4-cli sh -lc "find . -path ./dist -
 
 1. `personal-cta-blocks.php`, `blocks/pulse-button/block.json`, `blocks/pulse-button/editor.asset.php` 버전을 같은 값으로 올립니다.
 2. `main`에 커밋·푸시하고 CI를 확인합니다.
-3. 같은 버전의 태그를 푸시합니다. 예: `git tag v0.7.0` 후 `git push origin v0.7.0`.
+3. 같은 버전의 태그를 푸시합니다. 예: `git tag v0.7.1` 후 `git push origin v0.7.1`.
 
 태그가 푸시되면 GitHub Actions가 설치 가능한 `personal-cta-blocks-{version}.zip`을 만들고 GitHub Release에 올립니다. 플러그인 폴더명과 메인 파일명은 기존 자동 업데이트 호환성을 위해 변경하지 않습니다.
