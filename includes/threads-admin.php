@@ -27,8 +27,9 @@ function personal_cta_threads_can_manage_post( $post_id ) {
  * @return array<string, mixed>
  */
 function personal_cta_threads_sanitize_settings( $input ) {
-	$input = is_array( $input ) ? $input : array();
-	$api_key = isset( $input['openai_api_key'] ) && is_string( $input['openai_api_key'] ) ? trim( wp_unslash( $input['openai_api_key'] ) ) : '';
+	$input   = is_array( $input ) ? $input : array();
+	$current = personal_cta_threads_settings();
+	$api_key  = isset( $input['openai_api_key'] ) && is_string( $input['openai_api_key'] ) ? trim( wp_unslash( $input['openai_api_key'] ) ) : '';
 
 	if ( '' !== $api_key ) {
 		$result = is_ssl()
@@ -41,11 +42,33 @@ function personal_cta_threads_sanitize_settings( $input ) {
 		personal_cta_threads_delete_openai_key();
 	}
 
+	$style_examples = isset( $current['style_examples'] ) && is_array( $current['style_examples'] ) ? $current['style_examples'] : array();
+	if ( isset( $input['style_examples'] ) && is_array( $input['style_examples'] ) ) {
+		$style_examples = array();
+		foreach ( array_slice( $input['style_examples'], 0, 5 ) as $example ) {
+			if ( ! is_scalar( $example ) ) {
+				continue;
+			}
+			$example = trim( sanitize_textarea_field( wp_unslash( (string) $example ) ) );
+			if ( '' === $example ) {
+				continue;
+			}
+			if ( personal_cta_threads_length( $example ) > 500 ) {
+				add_settings_error( 'personal_cta_threads', 'style_examples', '스타일 예시는 각각 500자 이하여야 합니다.', 'error' );
+				continue;
+			}
+			if ( ! in_array( $example, $style_examples, true ) ) {
+				$style_examples[] = $example;
+			}
+		}
+	}
+
 	return array(
-		'enabled'      => ! empty( $input['enabled'] ),
-		'include_link' => ! empty( $input['include_link'] ),
-		'add_utm'      => ! empty( $input['add_utm'] ),
-		'model'        => 'gpt-5.6-sol',
+		'enabled'        => ! empty( $input['enabled'] ),
+		'include_link'   => ! empty( $input['include_link'] ),
+		'add_utm'        => ! empty( $input['add_utm'] ),
+		'model'          => 'gpt-5.6-sol',
+		'style_examples' => $style_examples,
 	);
 }
 
@@ -136,6 +159,16 @@ function personal_cta_threads_render_settings_page() {
 				<tr>
 					<th scope="row">AI 모델</th>
 					<td><code>gpt-5.6-sol</code></td>
+				</tr>
+				<tr>
+					<th scope="row">스타일 예시</th>
+					<td>
+						<?php $style_examples = isset( $settings['style_examples'] ) && is_array( $settings['style_examples'] ) ? array_values( $settings['style_examples'] ) : array(); ?>
+						<?php for ( $index = 0; $index < 5; $index++ ) : ?>
+							<p><textarea name="<?php echo esc_attr( PERSONAL_CTA_THREADS_SETTINGS_OPTION ); ?>[style_examples][]" rows="4" class="large-text" maxlength="500" placeholder="잘 나온 Threads 본문 예시 <?php echo esc_attr( $index + 1 ); ?> (URL 제외)"><?php echo esc_textarea( isset( $style_examples[ $index ] ) ? $style_examples[ $index ] : '' ); ?></textarea></p>
+						<?php endfor; ?>
+						<p class="description">원하는 말투와 구성의 합격 문구 3~5개를 넣으세요. 서로 다른 주제의 본문만 넣고 URL은 빼는 것이 좋습니다. 비어 있는 칸은 무시됩니다.</p>
+					</td>
 				</tr>
 			</table>
 			<hr>
@@ -408,10 +441,12 @@ function personal_cta_threads_diagnostic_strategy( $strategy ) {
  * @return array<string, mixed>
  */
 function personal_cta_threads_admin_diagnostics( $post_id ) {
-	$state    = personal_cta_threads_state( $post_id );
-	$fact_map = personal_cta_threads_meta( $post_id, 'fact_map', array() );
-	$stored   = personal_cta_threads_meta( $post_id, 'drafts', array() );
-	$drafts   = array();
+	$state           = personal_cta_threads_state( $post_id );
+	$composer        = personal_cta_threads_diagnostic_copy( personal_cta_threads_meta( $post_id, 'composer_result', array() ) );
+	$composer_repair = personal_cta_threads_diagnostic_copy( personal_cta_threads_meta( $post_id, 'composer_repair_result', array() ) );
+	$fact_map        = personal_cta_threads_meta( $post_id, 'fact_map', array() );
+	$stored          = personal_cta_threads_meta( $post_id, 'drafts', array() );
+	$drafts          = array();
 	$order    = array_unique( array_merge( array( 'A', 'B', 'C', 'H1', 'H2', 'H3' ), is_array( $stored ) ? array_keys( $stored ) : array() ) );
 	foreach ( $order as $id ) {
 		$draft = is_array( $stored ) && isset( $stored[ $id ] ) ? personal_cta_threads_diagnostic_copy( $stored[ $id ] ) : null;
@@ -502,17 +537,19 @@ function personal_cta_threads_admin_diagnostics( $post_id ) {
 	}
 
 	return array(
-		'status'        => $state['status'],
-		'stage'         => $state['stage'],
-		'fact_map'      => $safe_fact_map,
-		'strategy'      => personal_cta_threads_diagnostic_strategy( personal_cta_threads_meta( $post_id, 'strategy', array() ) ),
-		'drafts'        => $drafts,
-		'editor_raw'    => $safe_editor,
-		'editor'        => $safe_editor,
-		'final_quality' => $safe_quality,
-		'repair'        => personal_cta_threads_diagnostic_copy( personal_cta_threads_meta( $post_id, 'repair_result', array() ) ),
-		'verifier'      => $safe_verifier,
-		'final'         => $final,
+		'status'          => $state['status'],
+		'stage'           => $state['stage'],
+		'composer'        => $composer,
+		'composer_repair' => $composer_repair,
+		'fact_map'        => $safe_fact_map,
+		'strategy'        => personal_cta_threads_diagnostic_strategy( personal_cta_threads_meta( $post_id, 'strategy', array() ) ),
+		'drafts'          => $drafts,
+		'editor_raw'      => $safe_editor,
+		'editor'          => $safe_editor,
+		'final_quality'   => $safe_quality,
+		'repair'          => personal_cta_threads_diagnostic_copy( personal_cta_threads_meta( $post_id, 'repair_result', array() ) ),
+		'verifier'        => $safe_verifier,
+		'final'           => $final,
 	);
 }
 

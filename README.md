@@ -5,9 +5,9 @@ WordPress용 펄스 CTA 블록과 AI Threads 문구 생성 기능을 한 플러�
 - 글 편집기에서 `/ㅂㅌ`으로 반응형 CTA 버튼 추가
 - CTA 버튼별 새 탭, `nofollow`, `sponsored` 링크 설정
 - 글 편집기 상단의 `Threads 문구` 아이콘에서 문구 생성
-- 원자 사실 추출 → 콘텐츠 전략·Hook Lab → 서로 다른 구조의 Writer 3명 → 편집장 재작성
-- 최종 문체·전환력 심사와 독립 원문 사실 검증을 통과한 문구만 노출
-- Writer와 편집장은 SEO 원문 대신 검증된 FACT MAP만 사용
+- 저장된 원문 전체와 관리자가 등록한 합격 예시를 한 번에 읽는 AI Composer
+- 정상 생성은 OpenAI 호출 1회, 500자 초과일 때만 한 번 축약
+- 문체 취향이 달라도 사용할 수 있는 문구는 버리지 않고 관리자에게 표시
 - 문구 재생성·복사 후 Threads에 직접 업로드
 - 원문 링크와 선택적인 UTM을 복사 문구 끝에 자동 추가
 
@@ -37,11 +37,12 @@ define( 'PERSONAL_CTA_OPENAI_API_KEY', '...');
 1. 플러그인을 설치하고 활성화합니다.
 2. WordPress 관리자에서 `설정 → Threads 문구`를 엽니다.
 3. 기능을 켜고 OpenAI API 키, 복사할 원문 링크와 UTM 사용 여부를 저장합니다.
-4. 일반 글을 발행한 뒤 PC에서 해당 글의 Gutenberg 편집 화면을 엽니다.
-5. 상단 `게시/업데이트` 근처의 `Threads 문구` 아이콘을 눌러 전용 패널을 열고 `문구 만들기`를 누릅니다.
-6. 생성 중에는 8단계 진행 상태와 마지막 서버 활동을 확인합니다. 정상 새 생성은 최대 8회의 단계별 API 호출을 사용하며, 오류·보정까지 포함한 한 작업의 안전 상한은 10회입니다.
-7. 결과가 기대와 다르면 패널 아래의 `생성 단계 진단 (관리자 전용)`을 열어 FACT MAP, 전략·Hook, Writer 초안 3개, 편집장, 최종 품질, 사실 검증 결과를 비교합니다.
-8. 준비된 문구를 `복사`해 Threads에 직접 붙여넣고 업로드합니다.
+4. `스타일 예시`에 원하는 말투와 구성으로 잘 나온 Threads 본문을 3~5개 넣습니다. 서로 다른 주제의 예시를 쓰고 URL은 빼세요.
+5. 일반 글을 발행한 뒤 PC에서 해당 글의 Gutenberg 편집 화면을 엽니다.
+6. 상단 `게시/업데이트` 근처의 `Threads 문구` 아이콘을 눌러 전용 패널을 열고 `문구 만들기`를 누릅니다.
+7. 정상 생성은 Composer API 호출 1회를 사용합니다. 결과가 500자를 넘을 때만 같은 원문을 바탕으로 한 번 더 줄입니다.
+8. 결과가 기대와 다르면 패널 아래의 `생성 단계 진단 (관리자 전용)`에서 Composer 원본, 길이 보정 결과와 최종 문구를 비교합니다.
+9. 준비된 문구를 `복사`해 Threads에 직접 붙여넣고 업로드합니다.
 
 상단 아이콘, 패널과 REST 요청은 해당 글을 편집할 수 있는 `manage_options` 권한 사용자에게만 제공됩니다.
 
@@ -51,7 +52,7 @@ define( 'PERSONAL_CTA_OPENAI_API_KEY', '...');
 
 ## 생성 작업과 Cron
 
-문구 생성은 한 번에 여러 OpenAI 호출을 하지 않고, 짧은 단계로 나누어 WP-Cron으로 이어서 실행합니다. 방문량이 적은 운영 서버에서는 시스템 Cron으로 WordPress의 due event를 1분마다 실행하는 구성이 안정적입니다.
+문구 생성은 OpenAI Composer 호출 한 번으로 끝나며, 500자 초과 시에만 축약 호출을 다음 WP-Cron 작업으로 이어서 실행합니다. 방문량이 적은 운영 서버에서는 시스템 Cron으로 WordPress의 due event를 1분마다 실행하는 구성이 안정적입니다.
 
 ```cron
 * * * * * cd /var/www/wordpress && wp cron event run --due-now --quiet
@@ -76,6 +77,6 @@ docker run --rm --mount $mount -w /app php:7.4-cli sh -lc "find . -path ./dist -
 
 1. `personal-cta-blocks.php`, `blocks/pulse-button/block.json`, `blocks/pulse-button/editor.asset.php` 버전을 같은 값으로 올립니다.
 2. `main`에 커밋·푸시하고 CI를 확인합니다.
-3. 같은 버전의 태그를 푸시합니다. 예: `git tag v0.5.9` 후 `git push origin v0.5.9`.
+3. 같은 버전의 태그를 푸시합니다. 예: `git tag v0.6.0` 후 `git push origin v0.6.0`.
 
 태그가 푸시되면 GitHub Actions가 설치 가능한 `personal-cta-blocks-{version}.zip`을 만들고 GitHub Release에 올립니다. 플러그인 폴더명과 메인 파일명은 기존 자동 업데이트 호환성을 위해 변경하지 않습니다.

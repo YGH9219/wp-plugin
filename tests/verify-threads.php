@@ -499,6 +499,68 @@ $sentence_verifier = array(
 );
 pct_assert( 2 === count( $sentence_units ) && 'T002' === $sentence_units[1]['id'] && true === personal_cta_threads_validate_verifier( $sentence_verifier, $fact_map, $source['text'], $sentence_units, array( 'F1' ) ), 'Verifier units must split sentences and allow a separate non-factual CTA.' );
 
+/* Runtime generation is one Composer call; soft copy preferences never hide output. */
+$test_options[ PERSONAL_CTA_THREADS_SETTINGS_OPTION ] = array(
+	'enabled'        => true,
+	'include_link'   => true,
+	'add_utm'        => true,
+	'model'          => 'gpt-5.6-sol',
+	'style_examples' => array( '상황이 바로 보이는 좋은 Threads 예시야.\n\n구체적인 행동으로 끝내 👇' ),
+);
+$composer_post_id        = 40;
+$composer_text           = "테스트 글을 읽기 전에 첫 문단부터 확인해봐.\n\n필요한 내용을 바로 찾을 수 있어 👇";
+$test_remote_response    = new WP_Error( 'unexpected_request', 'The mock response queue was exhausted.' );
+$test_remote_responses   = array( pct_openai_response( 'resp_composer', array( 'text' => $composer_text ) ) );
+$composer_request_start  = count( $test_remote_requests );
+$composer_result         = personal_cta_threads_generate( $composer_post_id, false );
+$composer_requests       = array_slice( $test_remote_requests, $composer_request_start );
+pct_assert( is_array( $composer_result ) && empty( $composer_result['pending'] ) && 'ready' === personal_cta_threads_meta( $composer_post_id, 'status' ), 'A Composer result must reach ready in one call.' );
+pct_assert( 1 === count( $composer_requests ) && 1 === (int) personal_cta_threads_meta( $composer_post_id, 'call_count' ), 'Normal generation must make exactly one model call.' );
+$composer_payload = json_decode( $composer_requests[0]['args']['body'], true );
+$composer_user    = $composer_payload['input'][1]['content'][0]['text'];
+$composer_context = json_decode( substr( $composer_user, strpos( $composer_user, "\n" ) + 1 ), true );
+pct_assert( 'threads_composer' === $composer_payload['text']['format']['name'] && 'medium' === $composer_payload['text']['verbosity'], 'The runtime request must use the Composer contract and medium verbosity.' );
+pct_assert( false !== strpos( $composer_context['source_document'], '[S001] 제목: 테스트 글' ) && 1 === count( $composer_context['style_examples'] ), 'Composer must receive the full saved source and administrator examples as data.' );
+pct_assert( 'not_run' === personal_cta_threads_meta( $composer_post_id, 'verifier_state' ), 'Manual copy generation must not spend a blocking verifier call.' );
+
+$reuse_request_start = count( $test_remote_requests );
+$reuse_result        = personal_cta_threads_generate( $composer_post_id, false );
+pct_assert( ! empty( $reuse_result['reused'] ) && $reuse_request_start === count( $test_remote_requests ), 'An unchanged ready result must be reused without an API call.' );
+
+$test_remote_responses = array( pct_openai_response( 'resp_regenerate', array( 'text' => "새 문구야.\n\n다시 확인해봐 👇" ) ) );
+$regenerate_start      = count( $test_remote_requests );
+$regenerate_result     = personal_cta_threads_generate( $composer_post_id, true );
+pct_assert( is_array( $regenerate_result ) && empty( $regenerate_result['pending'] ) && 1 === count( array_slice( $test_remote_requests, $regenerate_start ) ), 'Regenerate must create one fresh Composer result.' );
+
+/* Only the hard 500-character limit may trigger one shortening call. */
+$repair_post_id        = 41;
+$test_remote_responses = array(
+	pct_openai_response( 'resp_long_composer', array( 'text' => str_repeat( '가', 600 ) ) ),
+	pct_openai_response( 'resp_composer_repair', array( 'text' => "짧게 정리한 문구야.\n\n내용을 확인해봐 👇" ) ),
+);
+$repair_start  = count( $test_remote_requests );
+$repair_result = pct_drive_generation( $repair_post_id, 3 );
+pct_assert( is_array( $repair_result ) && empty( $repair_result['pending'] ) && 'ready' === personal_cta_threads_meta( $repair_post_id, 'status' ), 'An over-limit Composer result must be shortened once and delivered.' );
+pct_assert( 2 === count( array_slice( $test_remote_requests, $repair_start ) ) && 2 === (int) personal_cta_threads_meta( $repair_post_id, 'call_count' ), 'Length repair must add exactly one bounded call.' );
+
+/* A stylistically plain but valid result is shown instead of failing a quality gate. */
+$plain_post_id         = 42;
+$plain_text            = '제출 목적과 기한을 확인하고 필요한 서류를 준비하세요.';
+$test_remote_responses = array( pct_openai_response( 'resp_plain_composer', array( 'text' => $plain_text ) ) );
+$plain_result          = personal_cta_threads_generate( $plain_post_id, false );
+pct_assert( is_array( $plain_result ) && $plain_text === $plain_result['text'] && 'ready' === personal_cta_threads_meta( $plain_post_id, 'status' ), 'Soft style preferences must never discard a usable draft.' );
+
+/* A saved-source change invalidates the cached body and makes one new call. */
+$test_post_title       = '변경된 테스트 글';
+$test_remote_responses = array( pct_openai_response( 'resp_changed_source', array( 'text' => '변경된 글을 반영한 새 문구야.' ) ) );
+$changed_start         = count( $test_remote_requests );
+$changed_result        = personal_cta_threads_generate( $composer_post_id, false );
+pct_assert( is_array( $changed_result ) && empty( $changed_result['pending'] ) && 1 === count( array_slice( $test_remote_requests, $changed_start ) ), 'Changing the saved source must invalidate Composer cache once.' );
+$test_post_title = '테스트 글';
+
+echo "Threads v0.6 Composer safeguards are valid.\n";
+exit( 0 );
+
 /* Normal v0.5 generation: FACT, strategy, three writers, editor, quality, verifier. */
 $normal_post_id        = 20;
 $normal_editor         = pct_copy( 'H1', 'reversal' );

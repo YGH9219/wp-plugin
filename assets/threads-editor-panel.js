@@ -26,8 +26,8 @@
 		idle: '아직 문구가 없습니다.',
 		queued: 'AI 문구 생성 작업을 기다리는 중…',
 		analyzing: '원문의 사실과 소재를 분석하는 중…',
-		drafting: '서로 다른 문구 초안을 만드는 중…',
-		editing: '최종 문구를 다듬는 중…',
+		drafting: '원문을 Threads 문구로 바꾸는 중…',
+		editing: '500자 제한에 맞춰 문구를 정리하는 중…',
 		ready: '문구가 준비되었습니다. 복사해 Threads에 직접 올리세요.',
 		failed: '문구 생성에 실패했습니다.',
 	};
@@ -36,6 +36,8 @@
 		editor_retry: '6/8 최종 문구 편집을 압축해 한 번 복구',
 		queued: '대기열에 등록됨',
 		waiting_lock: '다른 작업이 끝나길 기다리는 중',
+		composer: 'AI Composer 문구 생성',
+		composer_repair: '500자 제한에 맞춰 한 번 정리',
 		fact: '1/8 원자 사실 추출',
 		fact_retry: '1/8 원자 사실의 보존 항목을 한 번 다시 추출',
 		strategy: '2/8 콘텐츠 전략·Hook 설계',
@@ -321,6 +323,12 @@
 		const disabled = ! postId || ! published || hasUnsavedChanges || busy || working;
 		const diagnosticDrafts = diagnostic && Array.isArray( diagnostic.drafts ) ? diagnostic.drafts : [];
 		const diagnosticEntries = [];
+		if ( diagnostic && diagnostic.composer ) {
+			diagnosticEntries.push( { label: 'AI Composer 원본', value: diagnostic.composer.text || '', rows: 10 } );
+		}
+		if ( diagnostic && diagnostic.composer_repair ) {
+			diagnosticEntries.push( { label: '500자 보정 결과', value: diagnostic.composer_repair.text || '', rows: 10 } );
+		}
 		if ( diagnostic && diagnostic.fact_map ) {
 			diagnosticEntries.push( { label: '1. FACT MAP', value: diagnosticJson( diagnostic.fact_map ), rows: 12 } );
 		}
@@ -422,7 +430,7 @@
 						setDiagnosticOpen( nextOpen );
 					},
 				},
-				createElement( 'p', { className: 'pct-threads-editor-progress' }, 'FACT MAP부터 최종 검증까지 저장된 생성 단계를 비교합니다. 원문과 API 정보는 표시하지 않습니다.' ),
+				createElement( 'p', { className: 'pct-threads-editor-progress' }, 'AI Composer 원본과 500자 보정·최종 문구를 비교합니다. 원문과 API 정보는 표시하지 않습니다.' ),
 				diagnosticOpen && createElement( Button, { variant: 'secondary', onClick: loadDiagnostics, disabled: diagnosticBusy }, '진단 새로고침' ),
 				diagnosticBusy && createElement( Spinner, null ),
 				diagnosticError && createElement( Notice, { status: 'error', isDismissible: false }, diagnosticError ),
