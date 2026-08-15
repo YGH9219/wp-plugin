@@ -29,6 +29,9 @@
 		drafting: '원문을 Threads 문구로 바꾸는 중…',
 		editing: '500자 제한에 맞춰 문구를 정리하는 중…',
 		ready: '문구가 준비되었습니다. 복사해 Threads에 직접 올리세요.',
+		publishing: 'Threads에 자동 게시하는 중…',
+		published: 'Threads 자동 게시가 완료되었습니다.',
+		uncertain: '게시 응답을 확인하지 못해 중복 방지를 위해 자동 재시도를 멈췄습니다.',
 		failed: '문구 생성에 실패했습니다.',
 	};
 	const stages = {
@@ -57,6 +60,8 @@
 		source_changed: '저장된 원문 변경 감지',
 		verifier: '8/8 원문 기반 사실 검증',
 		verified: '8/8 사실 검증 완료',
+		publishing: 'Threads 게시 요청',
+		published: 'Threads 자동 게시 완료',
 		ready: '완료',
 	};
 
@@ -319,7 +324,7 @@
 		const status = working
 			? ( busy && message ? message : ( labels[ state.status ] || ( '상태: ' + state.status ) ) )
 			: ( message || labels[ state.status ] || ( '상태: ' + state.status ) );
-		const displayedError = error || ( 'failed' === state.status ? state.last_error : '' );
+		const displayedError = error || ( [ 'failed', 'uncertain' ].includes( state.status ) ? state.last_error : '' );
 		const disabled = ! postId || ! published || hasUnsavedChanges || busy || working;
 		const diagnosticDrafts = diagnostic && Array.isArray( diagnostic.drafts ) ? diagnostic.drafts : [];
 		const diagnosticEntries = [];
@@ -406,6 +411,7 @@
 				),
 				'failed' === state.status && state.stage && createElement( 'p', { className: 'pct-threads-editor-progress' }, '실패 단계: ' + ( stages[ state.stage ] || state.stage ) ),
 				displayedError && createElement( Notice, { status: 'error', isDismissible: false }, displayedError ),
+				'published' === state.status && state.remote_url && createElement( 'p', null, createElement( 'a', { href: state.remote_url, target: '_blank', rel: 'noopener noreferrer' }, '게시된 Threads 글 열기' ) ),
 				createElement( TextareaControl, {
 					label: '복사할 문구',
 					value: copyText,

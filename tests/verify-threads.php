@@ -6,6 +6,9 @@
 define( 'ABSPATH', __DIR__ );
 define( 'PERSONAL_CTA_BLOCKS_FILE', dirname( __DIR__ ) . '/personal-cta-blocks.php' );
 define( 'OPENAI_API_KEY', 'test-openai-key' );
+define( 'PERSONAL_CTA_THREADS_MASTER_KEY', 'test-legacy-master-key' );
+define( 'MINUTE_IN_SECONDS', 60 );
+define( 'HOUR_IN_SECONDS', 3600 );
 define( 'DAY_IN_SECONDS', 86400 );
 
 $test_options          = array();
@@ -13,6 +16,9 @@ $test_meta             = array();
 $test_remote_response  = array();
 $test_remote_responses = array();
 $test_remote_requests  = array();
+$test_meta_responses   = array();
+$test_meta_requests    = array();
+$test_scheduled_events = array();
 $test_permalink        = '';
 $test_post_title       = '테스트 글';
 
@@ -123,10 +129,30 @@ function parse_blocks( $content ) {
 	);
 }
 function current_user_can( $capability, $post_id = 0 ) { return true; }
-function wp_next_scheduled( $hook, $args = array() ) { return false; }
-function wp_schedule_single_event( $timestamp, $hook, $args = array(), $wp_error = false ) { return true; }
-function wp_schedule_event( $timestamp, $recurrence, $hook ) { return true; }
-function wp_unschedule_hook( $hook ) { return true; }
+function wp_next_scheduled( $hook, $args = array() ) {
+	global $test_scheduled_events;
+	foreach ( $test_scheduled_events as $event ) {
+		if ( $hook === $event['hook'] && $args === $event['args'] ) {
+			return $event['timestamp'];
+		}
+	}
+	return false;
+}
+function wp_schedule_single_event( $timestamp, $hook, $args = array(), $wp_error = false ) {
+	global $test_scheduled_events;
+	$test_scheduled_events[] = array( 'timestamp' => (int) $timestamp, 'hook' => $hook, 'args' => $args, 'recurrence' => '' );
+	return true;
+}
+function wp_schedule_event( $timestamp, $recurrence, $hook, $args = array() ) {
+	global $test_scheduled_events;
+	$test_scheduled_events[] = array( 'timestamp' => (int) $timestamp, 'hook' => $hook, 'args' => $args, 'recurrence' => $recurrence );
+	return true;
+}
+function wp_unschedule_hook( $hook ) {
+	global $test_scheduled_events;
+	$test_scheduled_events = array_values( array_filter( $test_scheduled_events, function ( $event ) use ( $hook ) { return $hook !== $event['hook']; } ) );
+	return true;
+}
 function get_posts( $args ) { return array(); }
 function wp_cache_delete( $key, $group = '' ) { return true; }
 function maybe_serialize( $value ) { return is_scalar( $value ) ? (string) $value : serialize( $value ); }
@@ -136,11 +162,29 @@ function wp_remote_post( $url, $args = array() ) {
 	$test_remote_requests[] = array( 'url' => $url, 'args' => $args );
 	return ! empty( $test_remote_responses ) ? array_shift( $test_remote_responses ) : $test_remote_response;
 }
+function wp_remote_request( $url, $args = array() ) {
+	global $test_meta_responses, $test_meta_requests;
+	$test_meta_requests[] = array( 'url' => $url, 'args' => $args );
+	return ! empty( $test_meta_responses )
+		? array_shift( $test_meta_responses )
+		: array( 'response' => array( 'code' => 500 ), 'body' => '{}' );
+}
 function wp_remote_retrieve_body( $response ) { return isset( $response['body'] ) ? $response['body'] : ''; }
 function wp_remote_retrieve_response_code( $response ) { return isset( $response['response']['code'] ) ? (int) $response['response']['code'] : 0; }
+function wp_timezone() { return new DateTimeZone( 'Asia/Seoul' ); }
+function wp_timezone_string() { return 'Asia/Seoul'; }
+function wp_date( $format, $timestamp = null ) {
+	$date = new DateTimeImmutable( '@' . ( null === $timestamp ? time() : (int) $timestamp ) );
+	return $date->setTimezone( wp_timezone() )->format( $format );
+}
+function wp_generate_uuid4() { return sprintf( '00000000-0000-4000-8000-%012d', random_int( 0, 999999999999 ) ); }
+function is_admin() { return true; }
+function wp_doing_cron() { return false; }
 
 require dirname( __DIR__ ) . '/includes/threads-core.php';
 require dirname( __DIR__ ) . '/includes/threads-openai.php';
+require dirname( __DIR__ ) . '/includes/threads-meta.php';
+require dirname( __DIR__ ) . '/includes/threads-daily.php';
 require dirname( __DIR__ ) . '/includes/threads-admin.php';
 
 function pct_assert( $condition, $message ) {
@@ -166,6 +210,10 @@ function pct_openai_response( $id, $data ) {
 			)
 		),
 	);
+}
+
+function pct_meta_response( $data, $status = 200 ) {
+	return array( 'response' => array( 'code' => $status ), 'body' => wp_json_encode( $data ) );
 }
 
 function pct_copy( $hook_id, $structure_id, $text = '테스트 글은 첫 문단부터 확인해야 해.' ) {
@@ -563,7 +611,8 @@ $changed_result        = personal_cta_threads_generate( $composer_post_id, false
 pct_assert( is_array( $changed_result ) && empty( $changed_result['pending'] ) && 1 === count( array_slice( $test_remote_requests, $changed_start ) ), 'Changing the saved source must invalidate Composer cache once.' );
 $test_post_title = '테스트 글';
 
-echo "Threads v0.6 Composer safeguards are valid.\n";
+pct_test_meta_daily();
+echo "Threads Composer, Meta publishing, and daily scheduling safeguards are valid.\n";
 exit( 0 );
 
 /* Normal v0.5 generation: FACT, strategy, three writers, editor, quality, verifier. */
@@ -795,4 +844,100 @@ $first_retry  = personal_cta_threads_retry_transient_error( 31, new WP_Error( 'p
 $second_retry = personal_cta_threads_retry_transient_error( 31, new WP_Error( 'pct_openai_network', 'test' ) );
 pct_assert( true === $first_retry && false === $second_retry && 'retry_wait' === personal_cta_threads_meta( 31, 'stage' ), 'A generation may spend only one automatic transport retry.' );
 
-echo "Threads v0.5 copy-generation safeguards are valid.\n";
+function pct_test_meta_daily() {
+	global $test_meta_responses, $test_meta_requests, $test_scheduled_events, $test_remote_responses;
+
+/* Meta credentials remain encrypted and a confirmed publish is idempotent. */
+$saved_app_secret = personal_cta_threads_save_app_secret( 'test-meta-app-secret' );
+pct_assert( true === $saved_app_secret && false === strpos( wp_json_encode( get_option( PERSONAL_CTA_THREADS_APP_SECRET_OPTION ) ), 'test-meta-app-secret' ), 'The Meta app secret must be encrypted at rest.' );
+$legacy_iv = random_bytes( 12 );
+$legacy_tag = '';
+$legacy_ciphertext = openssl_encrypt( 'legacy-threads-token', 'aes-256-gcm', hash( 'sha256', PERSONAL_CTA_THREADS_MASTER_KEY, true ), OPENSSL_RAW_DATA, $legacy_iv, $legacy_tag );
+update_option( PERSONAL_CTA_THREADS_ACCOUNT_OPTION, array(
+	'user_id' => '987654321', 'username' => 'legacy_user', 'source' => 'manual', 'issued_at' => time(), 'expires_at' => 0,
+	'token' => array( 'v' => 1, 'iv' => base64_encode( $legacy_iv ), 'tag' => base64_encode( $legacy_tag ), 'ciphertext' => base64_encode( $legacy_ciphertext ) ),
+) );
+$legacy_credentials = personal_cta_threads_credentials();
+pct_assert( is_array( $legacy_credentials ) && 'legacy-threads-token' === $legacy_credentials['access_token'], 'A pre-0.7 master-key token must migrate without disconnecting the existing account.' );
+pct_assert( 'legacy-threads-token' === personal_cta_threads_decrypt_secret( get_option( PERSONAL_CTA_THREADS_ACCOUNT_OPTION )['token'], PERSONAL_CTA_THREADS_TOKEN_AAD ), 'A legacy token must be re-encrypted with the current authenticated storage label.' );
+$test_meta_responses = array( pct_meta_response( array( 'id' => '123456789', 'username' => 'today_lifetip' ) ) );
+$connected = personal_cta_threads_connect_token( '123456789', 'test-long-lived-token', '' );
+pct_assert( true === $connected && ! empty( personal_cta_threads_account()['connected'] ), 'A validated long-lived token must connect the Threads account.' );
+pct_assert( false === strpos( wp_json_encode( get_option( PERSONAL_CTA_THREADS_ACCOUNT_OPTION ) ), 'test-long-lived-token' ), 'The Threads access token must never be stored in plaintext.' );
+
+$publish_post_id = 40;
+personal_cta_threads_set_meta( $publish_post_id, 'source_hash', personal_cta_threads_source( $publish_post_id )['hash'] );
+personal_cta_threads_set_meta( $publish_post_id, 'final_text', '자동 게시 테스트 문구야.' );
+$test_meta_responses = array(
+	pct_meta_response( array( 'id' => 'container-40' ) ),
+	pct_meta_response( array( 'id' => 'media-40' ) ),
+	pct_meta_response( array( 'id' => 'media-40', 'permalink' => 'https://www.threads.com/@today_lifetip/post/test40' ) ),
+);
+$publish_start  = count( $test_meta_requests );
+$publish_result = personal_cta_threads_publish_post( $publish_post_id, '자동 게시 테스트 문구야.' );
+$publish_again  = personal_cta_threads_publish_post( $publish_post_id, '자동 게시 테스트 문구야.' );
+pct_assert( is_array( $publish_result ) && 'media-40' === $publish_result['id'] && 'published' === personal_cta_threads_meta( $publish_post_id, 'status' ), 'A confirmed Meta publish must save its remote ID and published state.' );
+pct_assert( 'media-40' === $publish_again['id'] && 3 === count( $test_meta_requests ) - $publish_start, 'A confirmed post must never be sent to Meta twice.' );
+$published_state = personal_cta_threads_admin_state( $publish_post_id );
+pct_assert( 'published' === $published_state['status'] && '' !== $published_state['copy_text'] && false !== strpos( $published_state['remote_url'], 'threads.com' ), 'Published copy and its safe permalink must remain visible to the administrator.' );
+
+$automatic_post_id      = 52;
+$automatic_text         = '연결된 계정으로 정보글을 자동 게시하는 문구야.';
+$test_remote_responses  = array( pct_openai_response( 'resp_auto_publish', array( 'text' => $automatic_text ) ) );
+$test_meta_responses    = array(
+	pct_meta_response( array( 'id' => 'container-52' ) ),
+	pct_meta_response( array( 'id' => 'media-52' ) ),
+	pct_meta_response( array( 'id' => 'media-52', 'permalink' => 'https://www.threads.com/@today_lifetip/post/test52' ) ),
+);
+personal_cta_threads_set_state( $automatic_post_id, 'queued', 'queued' );
+personal_cta_threads_run_job( $automatic_post_id );
+pct_assert( 'published' === personal_cta_threads_meta( $automatic_post_id, 'status' ) && 'media-52' === personal_cta_threads_meta( $automatic_post_id, 'remote_id' ), 'A connected account must automatically publish a newly generated information post.' );
+
+/* Daily-life generation creates exactly five varied posts and site-local daytime slots. */
+$daily_posts = array();
+$daily_structures = personal_cta_threads_daily_structures();
+$daily_openings   = personal_cta_threads_daily_openings();
+$daily_endings    = personal_cta_threads_daily_endings();
+for ( $daily_index = 0; $daily_index < 5; $daily_index++ ) {
+	$daily_posts[] = array(
+		'text' => '일상에서 생각해볼 만한 서로 다른 관찰 ' . ( $daily_index + 1 ) . '번이야. 작은 기준 하나가 하루를 조금 편하게 만들 때가 있다.',
+		'topic' => '일상 주제 ' . ( $daily_index + 1 ),
+		'structure' => $daily_structures[ $daily_index ],
+		'opening_type' => $daily_openings[ $daily_index ],
+		'ending_type' => $daily_endings[ $daily_index ],
+		'used_personal_fact' => false,
+	);
+}
+$daily_valid = personal_cta_threads_validate_daily_posts( array( 'posts' => $daily_posts ), 5, array() );
+pct_assert( is_array( $daily_valid ) && 5 === count( $daily_valid ), 'The daily contract must accept exactly five safe, structurally varied posts.' );
+$daily_times = personal_cta_threads_daily_times( '2030-05-10', 5 );
+foreach ( $daily_times as $daily_time ) {
+	pct_assert( (int) wp_date( 'H', $daily_time ) >= 7 && (int) wp_date( 'H', $daily_time ) <= 23, 'A daily post may not be scheduled between midnight and 07:00.' );
+}
+pct_assert( 5 === count( array_unique( $daily_times ) ) && $daily_times === array_values( array_unique( $daily_times ) ), 'Daily publication times must be unique and ordered.' );
+
+$daily_settings = personal_cta_threads_settings();
+$daily_settings['daily_enabled'] = true;
+$daily_settings['daily_count']   = 5;
+update_option( PERSONAL_CTA_THREADS_SETTINGS_OPTION, $daily_settings );
+delete_option( PERSONAL_CTA_THREADS_DAILY_STATE_OPTION );
+$test_scheduled_events = array();
+$test_remote_responses = array( pct_openai_response( 'resp_daily_batch', array( 'posts' => $daily_posts ) ) );
+$daily_plan = personal_cta_threads_plan_daily_posts();
+$daily_publish_events = array_values( array_filter( $test_scheduled_events, function ( $event ) { return PERSONAL_CTA_THREADS_DAILY_PUBLISH_HOOK === $event['hook']; } ) );
+pct_assert( is_array( $daily_plan ) && 5 === count( $daily_plan['items'] ) && 5 === count( $daily_publish_events ), 'One daily OpenAI batch must schedule exactly five publication events.' );
+
+$daily_item_id = $daily_plan['items'][0]['id'];
+$test_meta_responses = array(
+	pct_meta_response( array( 'id' => 'daily-container-1' ) ),
+	pct_meta_response( array( 'id' => 'daily-media-1' ) ),
+	pct_meta_response( array( 'id' => 'daily-media-1', 'permalink' => 'https://www.threads.com/@today_lifetip/post/daily1' ) ),
+);
+personal_cta_threads_publish_daily_post( $daily_item_id );
+personal_cta_threads_publish_daily_post( $daily_item_id );
+$daily_state = get_option( PERSONAL_CTA_THREADS_DAILY_STATE_OPTION, array() );
+pct_assert( 'published' === $daily_state['items'][0]['status'] && 'daily-media-1' === $daily_state['items'][0]['remote_id'], 'A scheduled daily post must persist its two-step Meta publish result.' );
+pct_assert( 1 === count( personal_cta_threads_daily_history() ), 'A published daily post must enter the bounded recent-post history.' );
+}
+
+echo "Threads generation, Meta publishing, and daily scheduling safeguards are valid.\n";

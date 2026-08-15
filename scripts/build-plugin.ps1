@@ -71,6 +71,8 @@ try {
 		"$slug/$slug.php",
 		"$slug/includes/threads-core.php",
 		"$slug/includes/threads-openai.php",
+		"$slug/includes/threads-meta.php",
+		"$slug/includes/threads-daily.php",
 		"$slug/includes/threads-admin.php",
 		"$slug/assets/threads-editor-panel.js",
 		"$slug/assets/threads-editor-panel.css"

@@ -42,6 +42,32 @@ function personal_cta_threads_sanitize_settings( $input ) {
 		personal_cta_threads_delete_openai_key();
 	}
 
+	$app_secret = isset( $input['meta_app_secret'] ) && is_string( $input['meta_app_secret'] ) ? trim( wp_unslash( $input['meta_app_secret'] ) ) : '';
+	if ( '' !== $app_secret && function_exists( 'personal_cta_threads_save_app_secret' ) ) {
+		$result = is_ssl()
+			? personal_cta_threads_save_app_secret( $app_secret )
+			: new WP_Error( 'pct_meta_https_required', 'Threads App Secret은 HTTPS 관리자 화면에서만 저장할 수 있습니다.' );
+		if ( is_wp_error( $result ) ) {
+			add_settings_error( 'personal_cta_threads', 'meta_app_secret', $result->get_error_message(), 'error' );
+		}
+	} elseif ( ! empty( $input['delete_meta_app_secret'] ) ) {
+		delete_option( PERSONAL_CTA_THREADS_APP_SECRET_OPTION );
+	}
+
+	if ( ! empty( $input['disconnect_threads'] ) && function_exists( 'personal_cta_threads_disconnect' ) ) {
+		personal_cta_threads_disconnect();
+		add_settings_error( 'personal_cta_threads', 'threads_disconnected', 'Threads 계정 연결을 해제했습니다.', 'success' );
+	}
+	$threads_token = isset( $input['threads_access_token'] ) && is_string( $input['threads_access_token'] ) ? trim( (string) wp_unslash( $input['threads_access_token'] ) ) : '';
+	if ( '' !== $threads_token && function_exists( 'personal_cta_threads_connect_token' ) ) {
+		$user_id  = isset( $input['threads_user_id'] ) ? trim( sanitize_text_field( wp_unslash( (string) $input['threads_user_id'] ) ) ) : '';
+		$username = isset( $input['threads_username'] ) ? sanitize_text_field( wp_unslash( (string) $input['threads_username'] ) ) : '';
+		$result   = is_ssl()
+			? personal_cta_threads_connect_token( $user_id, $threads_token, $username )
+			: new WP_Error( 'pct_meta_https_required', 'Threads 토큰은 HTTPS 관리자 화면에서만 저장할 수 있습니다.' );
+		add_settings_error( 'personal_cta_threads', 'threads_token', is_wp_error( $result ) ? $result->get_error_message() : 'Threads 계정이 연결되었습니다.', is_wp_error( $result ) ? 'error' : 'success' );
+	}
+
 	$style_examples = isset( $current['style_examples'] ) && is_array( $current['style_examples'] ) ? $current['style_examples'] : array();
 	if ( isset( $input['style_examples'] ) && is_array( $input['style_examples'] ) ) {
 		$style_examples = array();
@@ -63,12 +89,26 @@ function personal_cta_threads_sanitize_settings( $input ) {
 		}
 	}
 
+	$app_id = isset( $input['meta_app_id'] ) ? trim( sanitize_text_field( wp_unslash( (string) $input['meta_app_id'] ) ) ) : (string) $current['meta_app_id'];
+	if ( '' !== $app_id && ! preg_match( '/^\d{1,32}$/', $app_id ) ) {
+		add_settings_error( 'personal_cta_threads', 'meta_app_id', 'Threads App ID는 숫자로 입력하세요.', 'error' );
+		$app_id = (string) $current['meta_app_id'];
+	}
+	if ( ! empty( $current['daily_enabled'] ) && empty( $input['daily_enabled'] ) && defined( 'PERSONAL_CTA_THREADS_DAILY_STATE_OPTION' ) ) {
+		wp_unschedule_hook( PERSONAL_CTA_THREADS_DAILY_PLANNER_HOOK );
+		wp_unschedule_hook( PERSONAL_CTA_THREADS_DAILY_PUBLISH_HOOK );
+		delete_option( PERSONAL_CTA_THREADS_DAILY_STATE_OPTION );
+	}
+
 	return array(
 		'enabled'        => ! empty( $input['enabled'] ),
 		'include_link'   => ! empty( $input['include_link'] ),
 		'add_utm'        => ! empty( $input['add_utm'] ),
 		'model'          => 'gpt-5.6-sol',
 		'style_examples' => $style_examples,
+		'meta_app_id'    => $app_id,
+		'daily_enabled'  => ! empty( $input['daily_enabled'] ),
+		'daily_count'    => max( 1, min( 5, isset( $input['daily_count'] ) ? (int) $input['daily_count'] : 5 ) ),
 	);
 }
 
@@ -106,6 +146,59 @@ function personal_cta_threads_add_settings_page() {
 }
 add_action( 'admin_menu', 'personal_cta_threads_add_settings_page' );
 
+/** Returns the exact Meta OAuth redirect URI that must be registered. */
+function personal_cta_threads_oauth_redirect_uri() {
+	return admin_url( 'admin-post.php?action=personal_cta_threads_oauth_callback' );
+}
+
+/** Starts the administrator-only Threads OAuth flow. */
+function personal_cta_threads_start_oauth() {
+	if ( ! current_user_can( 'manage_options' ) ) {
+		wp_die( esc_html__( '권한이 없습니다.', 'personal-cta-blocks' ), '', array( 'response' => 403 ) );
+	}
+	check_admin_referer( 'personal_cta_threads_start_oauth' );
+	$state = wp_generate_password( 48, false, false );
+	set_transient( 'pct_threads_oauth_' . hash( 'sha256', $state ), get_current_user_id(), 10 * MINUTE_IN_SECONDS );
+	$url = personal_cta_threads_oauth_url( personal_cta_threads_oauth_redirect_uri(), $state );
+	if ( is_wp_error( $url ) ) {
+		set_transient( 'pct_threads_notice_' . get_current_user_id(), $url->get_error_message(), MINUTE_IN_SECONDS );
+		wp_safe_redirect( admin_url( 'options-general.php?page=personal-cta-threads' ) );
+		exit;
+	}
+	wp_redirect( $url );
+	exit;
+}
+add_action( 'admin_post_personal_cta_threads_start_oauth', 'personal_cta_threads_start_oauth' );
+
+/** Completes the administrator-only Threads OAuth flow. */
+function personal_cta_threads_finish_oauth() {
+	if ( ! current_user_can( 'manage_options' ) ) {
+		wp_die( esc_html__( '권한이 없습니다.', 'personal-cta-blocks' ), '', array( 'response' => 403 ) );
+	}
+	$state = isset( $_GET['state'] ) ? sanitize_text_field( wp_unslash( (string) $_GET['state'] ) ) : '';
+	$key   = 'pct_threads_oauth_' . hash( 'sha256', $state );
+	$owner = '' !== $state ? (int) get_transient( $key ) : 0;
+	delete_transient( $key );
+	if ( ! $owner || get_current_user_id() !== $owner ) {
+		$result = new WP_Error( 'pct_meta_oauth_state', 'Threads 연결 요청이 만료됐습니다. 다시 연결하세요.' );
+	} elseif ( ! empty( $_GET['error'] ) ) {
+		$result = new WP_Error( 'pct_meta_oauth_cancelled', 'Threads 계정 연결이 취소됐습니다.' );
+	} else {
+		$code   = isset( $_GET['code'] ) ? trim( sanitize_text_field( wp_unslash( (string) $_GET['code'] ) ) ) : '';
+		$result = '' !== $code
+			? personal_cta_threads_oauth_callback( $code, personal_cta_threads_oauth_redirect_uri() )
+			: new WP_Error( 'pct_meta_oauth_code', 'Meta가 인증 코드를 보내지 않았습니다.' );
+	}
+	set_transient(
+		'pct_threads_notice_' . get_current_user_id(),
+		is_wp_error( $result ) ? $result->get_error_message() : 'Threads 계정 연결을 완료했습니다.',
+		MINUTE_IN_SECONDS
+	);
+	wp_safe_redirect( admin_url( 'options-general.php?page=personal-cta-threads' ) );
+	exit;
+}
+add_action( 'admin_post_personal_cta_threads_oauth_callback', 'personal_cta_threads_finish_oauth' );
+
 /**
  * Renders a compact configured/not-configured indicator.
  *
@@ -134,11 +227,23 @@ function personal_cta_threads_render_settings_page() {
 	$config_key    = personal_cta_threads_config_secret( 'PERSONAL_CTA_OPENAI_API_KEY', 'OPENAI_API_KEY' );
 	$stored_key    = personal_cta_threads_has_saved_openai_key();
 	$openai        = '' !== $config_key || $stored_key;
+	$account       = personal_cta_threads_account();
+	$app_secret    = personal_cta_threads_config_secret( 'PERSONAL_CTA_THREADS_APP_SECRET', 'PERSONAL_CTA_THREADS_APP_SECRET' );
+	$stored_secret = personal_cta_threads_has_saved_app_secret();
+	$app_ready     = ! empty( $account['app_configured'] );
+	$daily         = personal_cta_threads_daily_summary();
+	$notice        = get_transient( 'pct_threads_notice_' . get_current_user_id() );
+	if ( false !== $notice ) {
+		delete_transient( 'pct_threads_notice_' . get_current_user_id() );
+	}
 	?>
 	<div class="wrap">
 		<?php settings_errors( 'personal_cta_threads' ); ?>
+		<?php if ( is_string( $notice ) && '' !== $notice ) : ?>
+			<div class="notice notice-info is-dismissible"><p><?php echo esc_html( $notice ); ?></p></div>
+		<?php endif; ?>
 		<h1>Threads 문구</h1>
-		<p>발행한 글의 편집 화면 오른쪽 패널에서 AI 문구를 만들고 복사합니다. Threads 업로드는 직접 합니다.</p>
+		<p>Threads 계정이 연결되어 있으면 생성한 정보글과 예약 일상글을 자동 게시합니다. 연결하지 않으면 글 편집 화면에서 문구를 복사해 직접 올릴 수 있습니다.</p>
 
 		<h2>기능 설정</h2>
 		<form method="post" action="options.php">
@@ -187,6 +292,62 @@ function personal_cta_threads_render_settings_page() {
 							<p class="description"><code>wp-config.php</code> 또는 서버 환경변수의 키가 현재 우선 적용됩니다.</p>
 						<?php endif; ?>
 					</td>
+				</tr>
+			</table>
+			<hr>
+			<h2>Threads API 및 자동 발행</h2>
+			<table class="form-table" role="presentation">
+				<tr>
+					<th scope="row">연결 상태</th>
+					<td>
+						<?php personal_cta_threads_admin_status_badge( ! empty( $account['connected'] ) ); ?>
+						<?php if ( ! empty( $account['connected'] ) ) : ?>
+							<p><strong><?php echo esc_html( $account['username'] ? '@' . ltrim( $account['username'], '@' ) : 'Threads 사용자 ' . $account['user_id'] ); ?></strong> · 연결 방식 <?php echo esc_html( $account['source'] ); ?></p>
+							<?php if ( ! empty( $account['expires_at'] ) ) : ?><p class="description">토큰 만료 예정: <?php echo esc_html( wp_date( 'Y-m-d H:i', (int) $account['expires_at'] ) ); ?></p><?php endif; ?>
+							<p><label><input type="checkbox" name="<?php echo esc_attr( PERSONAL_CTA_THREADS_SETTINGS_OPTION ); ?>[disconnect_threads]" value="1"> 저장 시 Threads 계정 연결 해제</label></p>
+						<?php else : ?>
+							<p class="description">연결 전에는 자동 게시하지 않고 기존처럼 복사 문구만 제공합니다.</p>
+						<?php endif; ?>
+					</td>
+				</tr>
+				<tr>
+					<th scope="row">Threads App ID</th>
+					<td><input name="<?php echo esc_attr( PERSONAL_CTA_THREADS_SETTINGS_OPTION ); ?>[meta_app_id]" type="text" inputmode="numeric" class="regular-text" value="<?php echo esc_attr( $settings['meta_app_id'] ); ?>" placeholder="숫자 App ID"></td>
+				</tr>
+				<tr>
+					<th scope="row">Threads App Secret</th>
+					<td>
+						<?php personal_cta_threads_admin_status_badge( $app_ready ); ?>
+						<p><input name="<?php echo esc_attr( PERSONAL_CTA_THREADS_SETTINGS_OPTION ); ?>[meta_app_secret]" type="password" class="regular-text" autocomplete="new-password" spellcheck="false" placeholder="<?php echo esc_attr( $stored_secret ? '•••••••• (새 값 입력 시 교체)' : 'App Secret' ); ?>"></p>
+						<p class="description">다시 표시하지 않고 WordPress 보안 키로 암호화해 저장합니다. OAuth 리디렉션 URI는 Meta 앱에 아래 주소 그대로 등록하세요.</p>
+						<p><code><?php echo esc_html( personal_cta_threads_oauth_redirect_uri() ); ?></code></p>
+						<?php if ( $stored_secret ) : ?><p><label><input type="checkbox" name="<?php echo esc_attr( PERSONAL_CTA_THREADS_SETTINGS_OPTION ); ?>[delete_meta_app_secret]" value="1"> 저장된 App Secret 삭제</label></p><?php endif; ?>
+						<?php if ( '' !== $app_secret ) : ?><p class="description"><code>wp-config.php</code> 또는 환경변수의 App Secret이 우선 적용됩니다.</p><?php endif; ?>
+					</td>
+				</tr>
+				<tr>
+					<th scope="row">Meta OAuth</th>
+					<td><a class="button button-secondary" href="<?php echo esc_url( wp_nonce_url( admin_url( 'admin-post.php?action=personal_cta_threads_start_oauth' ), 'personal_cta_threads_start_oauth' ) ); ?>">Meta에서 Threads 계정 연결</a><p class="description">App ID와 App Secret을 먼저 저장한 뒤 누르세요.</p></td>
+				</tr>
+				<tr>
+					<th scope="row">장기 토큰 직접 연결</th>
+					<td>
+						<p><input name="<?php echo esc_attr( PERSONAL_CTA_THREADS_SETTINGS_OPTION ); ?>[threads_user_id]" type="text" inputmode="numeric" class="regular-text" placeholder="Threads 사용자 ID"></p>
+						<p><input name="<?php echo esc_attr( PERSONAL_CTA_THREADS_SETTINGS_OPTION ); ?>[threads_access_token]" type="password" class="large-text" autocomplete="new-password" spellcheck="false" placeholder="장기 액세스 토큰"></p>
+						<p><input name="<?php echo esc_attr( PERSONAL_CTA_THREADS_SETTINGS_OPTION ); ?>[threads_username]" type="text" class="regular-text" placeholder="사용자명 (선택)"></p>
+					</td>
+				</tr>
+			</table>
+			<hr>
+			<h2>일상글 자동 게시</h2>
+			<table class="form-table" role="presentation">
+				<tr>
+					<th scope="row">하루 5개</th>
+					<td><label><input type="checkbox" name="<?php echo esc_attr( PERSONAL_CTA_THREADS_SETTINGS_OPTION ); ?>[daily_enabled]" value="1" <?php checked( ! empty( $settings['daily_enabled'] ) ); ?>> 매일 일상글 5개를 생성하고 07:00~24:00 사이에 불규칙하게 자동 게시</label><input type="hidden" name="<?php echo esc_attr( PERSONAL_CTA_THREADS_SETTINGS_OPTION ); ?>[daily_count]" value="5"><p class="description">5개는 하루 한 번의 OpenAI 요청으로 함께 만들고, 최근 게시물 20개와 주제·구조·첫 문장을 비교합니다.</p></td>
+				</tr>
+				<tr>
+					<th scope="row">오늘 예약 상태</th>
+					<td><?php echo esc_html( $daily['date'] ? $daily['date'] . ' · ' . $daily['published'] . '/' . $daily['total'] . ' 게시' : '아직 생성된 일정이 없습니다.' ); ?><?php if ( $daily['next'] ) : ?><br><span class="description">다음 게시: <?php echo esc_html( wp_date( 'Y-m-d H:i', $daily['next'] ) ); ?></span><?php endif; ?><?php if ( $daily['last_error'] ) : ?><p style="color:#b32d2e"><?php echo esc_html( $daily['last_error'] ); ?></p><?php endif; ?></td>
 				</tr>
 			</table>
 			<?php submit_button( '변경 사항 저장' ); ?>
@@ -291,22 +452,23 @@ function personal_cta_threads_rest_error( $error, $fallback = 500 ) {
  * @return array<string, mixed>
  */
 function personal_cta_threads_admin_state( $post_id ) {
-	$state   = personal_cta_threads_state( $post_id );
-	$ready   = 'ready' === $state['status'];
-	if ( $ready && function_exists( 'personal_cta_threads_source' ) ) {
+	$state       = personal_cta_threads_state( $post_id );
+	$deliverable = in_array( $state['status'], array( 'ready', 'published' ), true )
+		|| ( 'failed' === $state['status'] && 'publishing' === $state['stage'] && '' !== trim( (string) $state['text'] ) );
+	if ( $deliverable && function_exists( 'personal_cta_threads_source' ) ) {
 		$source     = personal_cta_threads_source( $post_id );
 		$saved_hash = (string) personal_cta_threads_meta( $post_id, 'source_hash' );
 		if ( is_wp_error( $source ) || '' === $saved_hash || ! hash_equals( $saved_hash, $source['hash'] ) ) {
 			personal_cta_threads_set_meta( $post_id, 'verifier_state', 'not_run' );
 			personal_cta_threads_set_state( $post_id, 'failed', 'source_changed', '원문이 변경됐습니다. 저장한 뒤 Threads 문구를 다시 생성하세요.' );
-			$state = personal_cta_threads_state( $post_id );
-			$ready = false;
+			$state       = personal_cta_threads_state( $post_id );
+			$deliverable = false;
 		}
 	}
-	$text    = $ready ? (string) $state['text'] : '';
+	$text    = $deliverable ? (string) $state['text'] : '';
 	$payload = '' === $text ? null : personal_cta_threads_payload_text( $post_id, $text );
 
-	if ( ! $ready ) {
+	if ( ! $deliverable ) {
 		$state['text']        = '';
 		$state['ai_original'] = '';
 		$state['length']      = 0;

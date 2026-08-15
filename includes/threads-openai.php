@@ -68,6 +68,8 @@ function personal_cta_threads_openai_prompt_version( $stage ) {
 			return PERSONAL_CTA_THREADS_REPAIR_PROMPT_VERSION;
 		case 'composer':
 			return PERSONAL_CTA_THREADS_COMPOSER_PROMPT_VERSION;
+		case 'daily':
+			return defined( 'PERSONAL_CTA_THREADS_DAILY_PROMPT_VERSION' ) ? PERSONAL_CTA_THREADS_DAILY_PROMPT_VERSION : '1.0';
 		default:
 			return '1.0';
 	}
@@ -94,6 +96,7 @@ function personal_cta_threads_openai_stage_options( $stage, $recovery = false ) 
 		'repair'            => array( 'max_output_tokens' => 4096, 'reasoning_effort' => 'medium' ),
 		'verifier'          => array( 'max_output_tokens' => 4096, 'reasoning_effort' => 'medium' ),
 		'composer'          => array( 'max_output_tokens' => 6144, 'reasoning_effort' => 'medium' ),
+		'daily'             => array( 'max_output_tokens' => 8192, 'reasoning_effort' => 'medium' ),
 	);
 
 	if ( $recovery && 'editor' === $stage ) {
@@ -1740,7 +1743,8 @@ function personal_cta_threads_generate( $post_id, $regenerate = false ) {
 		&& hash_equals( hash( 'sha256', $existing ), (string) personal_cta_threads_meta( $post_id, 'text_hash' ) )
 		&& ! is_wp_error( personal_cta_threads_payload_text( $post_id, $existing ) );
 	if ( $existing_ok ) {
-		personal_cta_threads_set_state( $post_id, 'ready', 'ready' );
+		$already_published = '' !== (string) personal_cta_threads_meta( $post_id, 'remote_id' );
+		personal_cta_threads_set_state( $post_id, $already_published ? 'published' : 'ready', $already_published ? 'published' : 'ready' );
 		personal_cta_threads_set_meta( $post_id, 'regenerate', 0 );
 
 		return array( 'text' => $existing, 'pending' => false, 'reused' => true );

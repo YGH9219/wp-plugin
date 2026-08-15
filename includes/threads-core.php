@@ -23,6 +23,9 @@ function personal_cta_threads_settings() {
 		'add_utm'        => true,
 		'model'          => 'gpt-5.6-sol',
 		'style_examples' => array(),
+		'meta_app_id'    => '',
+		'daily_enabled'  => false,
+		'daily_count'    => 5,
 	);
 	$saved    = get_option( PERSONAL_CTA_THREADS_SETTINGS_OPTION, array() );
 
@@ -85,27 +88,27 @@ function personal_cta_threads_openai_storage_key() {
 }
 
 /**
- * Encrypts an API key before it enters the WordPress options table.
+ * Encrypts one server-side secret with an option-specific authenticated label.
  *
- * @param string $api_key API key.
+ * @param string $secret Plain secret.
+ * @param string $aad Authenticated option label.
  * @return array<string, string|int>|WP_Error
  */
-function personal_cta_threads_encrypt_openai_key( $api_key ) {
+function personal_cta_threads_encrypt_secret( $secret, $aad ) {
 	$key = personal_cta_threads_openai_storage_key();
 	if ( is_wp_error( $key ) ) {
 		return $key;
 	}
-
 	try {
 		$iv = random_bytes( 12 );
-	} catch ( Exception $exception ) {
-		return new WP_Error( 'pct_openai_storage_failed', 'API 키 암호화 준비에 실패했습니다.' );
+	} catch ( Exception $error ) {
+		return new WP_Error( 'pct_secret_storage_failed', '비밀 값 암호화 준비에 실패했습니다.' );
 	}
 
 	$tag        = '';
-	$ciphertext = openssl_encrypt( (string) $api_key, 'aes-256-gcm', $key, OPENSSL_RAW_DATA, $iv, $tag, PERSONAL_CTA_THREADS_OPENAI_KEY_AAD );
+	$ciphertext = openssl_encrypt( (string) $secret, 'aes-256-gcm', $key, OPENSSL_RAW_DATA, $iv, $tag, (string) $aad );
 	if ( false === $ciphertext || 16 !== strlen( $tag ) ) {
-		return new WP_Error( 'pct_openai_storage_failed', 'API 키 암호화에 실패했습니다.' );
+		return new WP_Error( 'pct_secret_storage_failed', '비밀 값 암호화에 실패했습니다.' );
 	}
 
 	return array(
@@ -117,33 +120,61 @@ function personal_cta_threads_encrypt_openai_key( $api_key ) {
 }
 
 /**
- * Decrypts a stored API key only for a server-side OpenAI request.
+ * Decrypts one server-side secret.
  *
- * @param mixed $envelope Stored encrypted key record.
+ * @param mixed  $envelope Encrypted record.
+ * @param string $aad Authenticated option label.
  * @return string|WP_Error
  */
-function personal_cta_threads_decrypt_openai_key( $envelope ) {
+function personal_cta_threads_decrypt_secret( $envelope, $aad ) {
 	$key = personal_cta_threads_openai_storage_key();
 	if ( is_wp_error( $key ) ) {
 		return $key;
 	}
 	if ( ! is_array( $envelope ) || 1 !== (int) ( $envelope['v'] ?? 0 ) ) {
-		return new WP_Error( 'pct_openai_storage_invalid', '저장된 API 키 형식이 올바르지 않습니다.' );
+		return new WP_Error( 'pct_secret_storage_invalid', '저장된 비밀 값 형식이 올바르지 않습니다.' );
 	}
 
 	$iv         = isset( $envelope['iv'] ) ? base64_decode( (string) $envelope['iv'], true ) : false;
 	$tag        = isset( $envelope['tag'] ) ? base64_decode( (string) $envelope['tag'], true ) : false;
 	$ciphertext = isset( $envelope['ciphertext'] ) ? base64_decode( (string) $envelope['ciphertext'], true ) : false;
 	if ( false === $iv || false === $tag || false === $ciphertext || 12 !== strlen( $iv ) || 16 !== strlen( $tag ) ) {
-		return new WP_Error( 'pct_openai_storage_invalid', '저장된 API 키 형식이 올바르지 않습니다.' );
+		return new WP_Error( 'pct_secret_storage_invalid', '저장된 비밀 값 형식이 올바르지 않습니다.' );
 	}
 
-	$api_key = openssl_decrypt( $ciphertext, 'aes-256-gcm', $key, OPENSSL_RAW_DATA, $iv, $tag, PERSONAL_CTA_THREADS_OPENAI_KEY_AAD );
-	if ( false === $api_key || '' === $api_key ) {
-		return new WP_Error( 'pct_openai_storage_invalid', '저장된 API 키를 읽을 수 없습니다. 새 키를 입력해 교체하세요.' );
-	}
+	$secret = openssl_decrypt( $ciphertext, 'aes-256-gcm', $key, OPENSSL_RAW_DATA, $iv, $tag, (string) $aad );
 
-	return $api_key;
+	return false === $secret || '' === $secret
+		? new WP_Error( 'pct_secret_storage_invalid', '저장된 비밀 값을 읽을 수 없습니다. 새 값으로 교체하세요.' )
+		: $secret;
+}
+
+/**
+ * Encrypts an API key before it enters the WordPress options table.
+ *
+ * @param string $api_key API key.
+ * @return array<string, string|int>|WP_Error
+ */
+function personal_cta_threads_encrypt_openai_key( $api_key ) {
+	$result = personal_cta_threads_encrypt_secret( $api_key, PERSONAL_CTA_THREADS_OPENAI_KEY_AAD );
+
+	return is_wp_error( $result )
+		? new WP_Error( 'pct_openai_storage_failed', $result->get_error_message() )
+		: $result;
+}
+
+/**
+ * Decrypts a stored API key only for a server-side OpenAI request.
+ *
+ * @param mixed $envelope Stored encrypted key record.
+ * @return string|WP_Error
+ */
+function personal_cta_threads_decrypt_openai_key( $envelope ) {
+	$result = personal_cta_threads_decrypt_secret( $envelope, PERSONAL_CTA_THREADS_OPENAI_KEY_AAD );
+
+	return is_wp_error( $result )
+		? new WP_Error( 'pct_openai_storage_invalid', '저장된 API 키를 읽을 수 없습니다. 새 키를 입력해 교체하세요.' )
+		: $result;
 }
 
 /**
@@ -288,7 +319,7 @@ function personal_cta_threads_state( $post_id ) {
  * @return bool
  */
 function personal_cta_threads_is_working( $status ) {
-	return in_array( (string) $status, array( 'queued', 'analyzing', 'drafting', 'editing' ), true );
+	return in_array( (string) $status, array( 'queued', 'analyzing', 'drafting', 'editing', 'publishing' ), true );
 }
 
 /**
@@ -742,6 +773,18 @@ function personal_cta_threads_run_job( $post_id ) {
 			personal_cta_threads_set_state( $post_id, 'failed', 'generation', 'AI 생성 결과가 비어 있습니다.' );
 			return;
 		}
+		if ( function_exists( 'personal_cta_threads_account' ) && function_exists( 'personal_cta_threads_publish_post' ) ) {
+			$account = personal_cta_threads_account();
+			if ( ! empty( $account['connected'] ) && '' === (string) personal_cta_threads_meta( $post_id, 'remote_id' ) ) {
+				$published = personal_cta_threads_publish_post( $post_id, $result['text'] );
+				if ( is_wp_error( $published ) ) {
+					if ( 'pct_uncertain' !== $published->get_error_code() ) {
+						personal_cta_threads_set_state( $post_id, 'failed', 'publishing', $published->get_error_message() );
+					}
+					return;
+				}
+			}
+		}
 
 	} catch ( Throwable $error ) {
 		$stage = (string) personal_cta_threads_meta( $post_id, 'stage', 'generation' );
@@ -836,7 +879,7 @@ function personal_cta_threads_watchdog() {
 				'relation' => 'AND',
 				array(
 					'key'     => '_pct_threads_status',
-					'value'   => array( 'queued', 'analyzing', 'drafting', 'editing' ),
+					'value'   => array( 'queued', 'analyzing', 'drafting', 'editing', 'publishing' ),
 					'compare' => 'IN',
 				),
 				array(
@@ -887,6 +930,8 @@ function personal_cta_threads_deactivate() {
 	wp_unschedule_hook( PERSONAL_CTA_THREADS_WATCHDOG_HOOK );
 	wp_unschedule_hook( 'personal_cta_threads_reconcile_job' );
 	wp_unschedule_hook( 'personal_cta_threads_refresh_token' );
+	wp_unschedule_hook( 'personal_cta_threads_daily_planner' );
+	wp_unschedule_hook( 'personal_cta_threads_daily_publish' );
 }
 register_deactivation_hook( PERSONAL_CTA_BLOCKS_FILE, 'personal_cta_threads_deactivate' );
 
@@ -901,7 +946,6 @@ function personal_cta_threads_clear_legacy_meta_jobs() {
 	}
 
 	wp_unschedule_hook( 'personal_cta_threads_reconcile_job' );
-	wp_unschedule_hook( 'personal_cta_threads_refresh_token' );
 	add_option( 'personal_cta_threads_meta_jobs_cleared', time(), '', false );
 }
 add_action( 'init', 'personal_cta_threads_clear_legacy_meta_jobs', 1 );
