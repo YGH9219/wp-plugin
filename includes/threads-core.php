@@ -467,7 +467,14 @@ function personal_cta_threads_outbound_url( $post_id ) {
 		);
 	}
 
-	return esc_url_raw( $url );
+	$url   = esc_url_raw( $url );
+	$parts = explode( '?', $url, 2 );
+
+	// Keep Korean slugs readable when copied. Browsers encode this path on
+	// request, while Threads no longer has to count every percent-encoded byte.
+	$parts[0] = rawurldecode( $parts[0] );
+
+	return implode( '?', $parts );
 }
 
 /**
