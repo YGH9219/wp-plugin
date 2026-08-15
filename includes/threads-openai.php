@@ -12,7 +12,7 @@ define( 'PERSONAL_CTA_THREADS_EDITOR_PROMPT_VERSION', '6.1' );
 define( 'PERSONAL_CTA_THREADS_QUALITY_PROMPT_VERSION', '2.3' );
 define( 'PERSONAL_CTA_THREADS_VERIFIER_PROMPT_VERSION', '3.1' );
 define( 'PERSONAL_CTA_THREADS_REPAIR_PROMPT_VERSION', '2.1' );
-define( 'PERSONAL_CTA_THREADS_COMPOSER_PROMPT_VERSION', '1.1' );
+define( 'PERSONAL_CTA_THREADS_COMPOSER_PROMPT_VERSION', '1.2' );
 define( 'PERSONAL_CTA_THREADS_SCHEMA_VERSION', '3.1' );
 define( 'PERSONAL_CTA_THREADS_CALL_LIMIT', 11 );
 
@@ -879,15 +879,16 @@ function personal_cta_threads_composer_schema() {
  */
 function personal_cta_threads_composer_prompt() {
 	return <<<'PROMPT'
-너는 한국 생활정보 콘텐츠를 Threads용으로 바꾸는 전문 카피라이터다.
+너는 한국 생활정보를 클릭하고 싶게 만드는 Threads 카피라이터다. 원문 요약이 아니라, source_document에서 독자가 멈춰 읽을 이유가 가장 큰 사실 하나를 중심으로 게시용 본문 하나를 쓴다. style_examples는 말투·호흡·구성만 참고하고 사실은 가져오지 않는다.
 
-source_document만 사실 근거로 사용해, 그대로 복사해 게시할 수 있는 한국어 Threads 본문 하나를 작성한다. style_examples는 말투·호흡·구성만 참고하고 그 안의 사실은 가져오지 않는다.
+작성 전에 답변에 표시하지 말고 원문이 직접 뒷받침하는 카피 각도 하나를 고른다. 우선순위는 ① 오해를 깨는 반전·차이 ② 피해야 할 실수와 첫 행동 ③ 중요한 조건·예외 ④ 독자 상황에서 바로 나오는 구체적 질문이다. 강한 각도가 없으면 과장하지 말고 가장 유용한 판단 기준을 쓴다.
 
-- 첫 1~2문장만 읽어도 독자가 어떤 상황에 있고 왜 계속 읽어야 하는지 알게 한다.
-- 원문의 핵심 상황, 구체적인 행동, 준비물, 조건과 예외를 독자 가치 순서로 재배치한다. 단순 요약문이나 공공기관 안내문처럼 쓰지 않는다.
-- 원문이 말하지 않은 유행, 피해, 위험, 손실, 혜택, 인과관계는 만들지 않는다. 가능성·권고·조건의 강도도 바꾸지 않는다.
-- 자연스러운 반말과 짧고 다양한 문단을 쓴다. 이모지는 필요할 때만 0~2개 사용하고 첫 문장을 장식하기 위해 억지로 넣지 않는다.
-- 마지막은 본문 내용과 연결된 구체적인 행동이나 판단으로 끝낸다. link_included=true이면 자연스럽게 👇로 끝내도 된다.
+- 첫 1~2문장에 구체적인 대상·상황과 선택한 반전·실수·조건·질문을 바로 보여준다. 제목을 바꿔 말하거나 '대상인지 확인해봐', '여부가 달라질 수 있어' 같은 행정 요약으로 시작하지 않는다.
+- 원문 전체를 요약하지 않는다. 선택한 각도를 이해하고 행동하는 데 필요한 사실·행동·조건 3~5개만 독자 가치 순서로 재배치한다. 설명보다 행동을 먼저 쓴다.
+- 번호 목록은 실제 순서나 준비물 자체가 핵심일 때만 쓴다. 모든 글을 체크리스트로 만들지 않는다.
+- 원문에 없는 유행, 피해, 위험, 손실, 혜택, 인과관계는 만들지 않는다. 가능성·권고·금지·우선순위의 강도도 바꾸지 않는다.
+- 자연스러운 반말, 짧고 길이가 다른 문단, 필요한 경우에만 이모지 0~2개를 쓴다.
+- 마지막은 독자가 지금 확인하거나 선택할 구체적인 항목으로 끝낸다. '원문·본문·링크에서 확인해' 같은 메타 문구는 쓰지 않는다. link_included=true이면 자연스럽게 👇로 끝낼 수 있다.
 - text에는 제목과 URL을 넣지 않고 max_body_length를 넘지 않는다.
 
 스키마 필드만 출력한다.
@@ -903,7 +904,7 @@ function personal_cta_threads_composer_repair_prompt() {
 	return <<<'PROMPT'
 너는 한국 Threads 카피 교열자다. source_document와 draft만 근거로 draft를 max_body_length 이하로 줄인다.
 
-독자 상황이 보이는 도입, 구체적인 행동·조건, 자연스러운 반말과 마지막 행동 문장은 유지한다. 반복과 부차적인 설명부터 덜어낸다. 새 사실을 추가하거나 의미의 강도를 바꾸지 말고 URL은 넣지 않는다.
+첫 문장의 근거 있는 반전·오해·실수 각도, 구체적인 행동·조건, 자연스러운 반말과 마지막 행동 문장은 유지한다. 반복과 부차적인 설명부터 덜어낸다. 새 사실을 추가하거나 의미의 강도를 바꾸지 말고 URL은 넣지 않는다.
 
 스키마 필드만 출력한다.
 PROMPT;
