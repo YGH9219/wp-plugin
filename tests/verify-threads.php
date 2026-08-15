@@ -521,6 +521,7 @@ $composer_user    = $composer_payload['input'][1]['content'][0]['text'];
 $composer_context = json_decode( substr( $composer_user, strpos( $composer_user, "\n" ) + 1 ), true );
 pct_assert( 'threads_composer' === $composer_payload['text']['format']['name'] && 'medium' === $composer_payload['text']['verbosity'], 'The runtime request must use the Composer contract and medium verbosity.' );
 pct_assert( false !== strpos( $composer_context['source_document'], '[S001] 제목: 테스트 글' ) && 1 === count( $composer_context['style_examples'] ), 'Composer must receive the full saved source and administrator examples as data.' );
+pct_assert( personal_cta_threads_body_limit( $composer_post_id ) - 8 === $composer_context['max_body_length'], 'Composer must reserve room for Threads emoji byte counting.' );
 pct_assert( 'not_run' === personal_cta_threads_meta( $composer_post_id, 'verifier_state' ), 'Manual copy generation must not spend a blocking verifier call.' );
 
 $reuse_request_start = count( $test_remote_requests );

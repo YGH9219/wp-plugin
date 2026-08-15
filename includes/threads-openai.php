@@ -12,7 +12,7 @@ define( 'PERSONAL_CTA_THREADS_EDITOR_PROMPT_VERSION', '6.1' );
 define( 'PERSONAL_CTA_THREADS_QUALITY_PROMPT_VERSION', '2.3' );
 define( 'PERSONAL_CTA_THREADS_VERIFIER_PROMPT_VERSION', '3.1' );
 define( 'PERSONAL_CTA_THREADS_REPAIR_PROMPT_VERSION', '2.1' );
-define( 'PERSONAL_CTA_THREADS_COMPOSER_PROMPT_VERSION', '1.0' );
+define( 'PERSONAL_CTA_THREADS_COMPOSER_PROMPT_VERSION', '1.1' );
 define( 'PERSONAL_CTA_THREADS_SCHEMA_VERSION', '3.1' );
 define( 'PERSONAL_CTA_THREADS_CALL_LIMIT', 11 );
 
@@ -1725,6 +1725,9 @@ function personal_cta_threads_generate( $post_id, $regenerate = false ) {
 	$model        = personal_cta_threads_openai_model();
 	$examples     = personal_cta_threads_style_examples();
 	$body_limit   = personal_cta_threads_body_limit( $post_id );
+	// The model counts an emoji as one visible character, while Threads counts
+	// its UTF-8 bytes. Reserve room for the prompt's maximum two common emoji.
+	$model_limit  = max( 1, $body_limit - 8 );
 	$run_key      = hash( 'sha256', $source['hash'] . '|' . $model . '|' . PERSONAL_CTA_THREADS_COMPOSER_PROMPT_VERSION . '|' . wp_json_encode( $examples ) . '|' . $delivery );
 	$saved_key    = (string) personal_cta_threads_meta( $post_id, 'generation_key' );
 	$existing     = trim( (string) personal_cta_threads_meta( $post_id, 'final_text' ) );
@@ -1772,7 +1775,7 @@ function personal_cta_threads_generate( $post_id, $regenerate = false ) {
 			array(
 				'source_document' => $source['text'],
 				'style_examples'  => $examples,
-				'max_body_length' => $body_limit,
+				'max_body_length' => $model_limit,
 				'link_included'   => $link_included,
 			),
 			personal_cta_threads_composer_schema()
@@ -1811,7 +1814,7 @@ function personal_cta_threads_generate( $post_id, $regenerate = false ) {
 					'source_document' => $source['text'],
 					'style_examples'  => $examples,
 					'draft'           => $composer['text'],
-					'max_body_length' => $body_limit,
+					'max_body_length' => $model_limit,
 					'link_included'   => $link_included,
 				),
 				personal_cta_threads_composer_schema()
