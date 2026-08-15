@@ -13,6 +13,16 @@ if ($block.name -ne 'personal-cta-blocks/pulse-button') { throw 'Unexpected bloc
 if ($block.version -ne $version) { throw 'Block and plugin versions do not match.' }
 if ($block.keywords -notcontains 'ㅂㅌ') { throw 'The /ㅂㅌ inserter keyword is missing.' }
 if (-not $block.attributes.text -or -not $block.attributes.url) { throw 'Text or URL attributes are missing.' }
+foreach ($attribute in @('openInNewTab', 'nofollow', 'sponsored')) {
+	if (-not $block.attributes.$attribute -or $block.attributes.$attribute.type -ne 'boolean' -or $block.attributes.$attribute.default -ne $false) {
+		throw "The $attribute link option must default to false."
+	}
+}
+
+$renderer = Get-Content -Raw -Encoding utf8 (Join-Path $root 'blocks\pulse-button\render.php')
+foreach ($linkValue in @('noopener', 'nofollow', 'sponsored', 'target="_blank"')) {
+	if (-not $renderer.Contains($linkValue)) { throw "The renderer is missing $linkValue support." }
+}
 
 @(
 	'personal-cta-blocks.php',

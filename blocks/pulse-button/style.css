@@ -35,6 +35,16 @@
 	transition: transform 160ms ease;
 }
 
+.wp-block-personal-cta-blocks-pulse-button .personal-cta-blocks-pulse-button__screen-reader-text {
+	clip: rect(1px, 1px, 1px, 1px);
+	clip-path: inset(50%);
+	height: 1px;
+	overflow: hidden;
+	position: absolute;
+	white-space: nowrap;
+	width: 1px;
+}
+
 .wp-block-personal-cta-blocks-pulse-button .personal-cta-blocks-pulse-button__button:hover {
 	box-shadow: 0 16px 34px rgba(79, 70, 229, 0.58), 0 0 0 14px rgba(99, 102, 241, 0.14);
 	color: #fff;

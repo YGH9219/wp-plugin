@@ -3,6 +3,7 @@
 WordPress용 펄스 CTA 블록과 AI Threads 문구 생성 기능을 한 플러그인으로 제공합니다.
 
 - 글 편집기에서 `/ㅂㅌ`으로 반응형 CTA 버튼 추가
+- CTA 버튼별 새 탭, `nofollow`, `sponsored` 링크 설정
 - 글 편집기 상단의 `Threads 문구` 아이콘에서 문구 생성
 - 원자 사실 추출 → 콘텐츠 전략·Hook Lab → 서로 다른 구조의 Writer 3명 → 편집장 재작성
 - 최종 문체·전환력 심사와 독립 원문 사실 검증을 통과한 문구만 노출
@@ -75,6 +76,6 @@ docker run --rm --mount $mount -w /app php:7.4-cli sh -lc "find . -path ./dist -
 
 1. `personal-cta-blocks.php`, `blocks/pulse-button/block.json`, `blocks/pulse-button/editor.asset.php` 버전을 같은 값으로 올립니다.
 2. `main`에 커밋·푸시하고 CI를 확인합니다.
-3. 같은 버전의 태그를 푸시합니다. 예: `git tag v0.5.8` 후 `git push origin v0.5.8`.
+3. 같은 버전의 태그를 푸시합니다. 예: `git tag v0.5.9` 후 `git push origin v0.5.9`.
 
 태그가 푸시되면 GitHub Actions가 설치 가능한 `personal-cta-blocks-{version}.zip`을 만들고 GitHub Release에 올립니다. 플러그인 폴더명과 메인 파일명은 기존 자동 업데이트 호환성을 위해 변경하지 않습니다.

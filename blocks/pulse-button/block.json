@@ -2,7 +2,7 @@
   "$schema": "https://schemas.wp.org/trunk/block.json",
   "apiVersion": 3,
   "name": "personal-cta-blocks/pulse-button",
-  "version": "0.5.8",
+  "version": "0.5.9",
   "title": "펄스 CTA 버튼",
   "category": "design",
   "icon": "megaphone",
@@ -17,6 +17,18 @@
     "url": {
       "type": "string",
       "default": ""
+    },
+    "openInNewTab": {
+      "type": "boolean",
+      "default": false
+    },
+    "nofollow": {
+      "type": "boolean",
+      "default": false
+    },
+    "sponsored": {
+      "type": "boolean",
+      "default": false
     }
   },
   "supports": {
