@@ -92,6 +92,7 @@ function delete_post_meta( $post_id, $key ) {
 	return true;
 }
 function esc_url_raw( $url ) { return $url; }
+function esc_attr( $value ) { return htmlspecialchars( (string) $value, ENT_QUOTES, 'UTF-8' ); }
 function wp_delete_file( $path ) { if ( is_file( $path ) ) { unlink( $path ); } }
 function is_singular( $type ) {
 	global $test_is_singular;
@@ -101,6 +102,7 @@ function get_queried_object_id() {
 	global $test_queried_id;
 	return $test_queried_id;
 }
+function get_the_ID() { return get_queried_object_id(); }
 
 require dirname( __DIR__ ) . '/includes/social-thumbnail.php';
 
@@ -139,6 +141,21 @@ pct_social_assert( array( 307, 546 ) === personal_cta_social_thumbnail_contain( 
 pct_social_assert( array( 0, 30, 1600, 840 ) === personal_cta_social_thumbnail_cover_crop( 1600, 900, 1200, 630 ), 'Cover crop must remove only excess height.' );
 pct_social_assert( array( 476, 0, 1524, 800 ) === personal_cta_social_thumbnail_cover_crop( 2000, 800, 1200, 630, 'right' ), 'Right focus must preserve the right edge.' );
 pct_social_assert( array( '배그 2차 비번', '해제 방법' ) === personal_cta_social_thumbnail_headline_lines( '배그 2차 비번 해제 방법' ), 'One concise phrase must balance into two readable lines.' );
+$test_post_meta[7]['rank_math_focus_keyword'] = '배그 2차 비밀번호, 계정 보안';
+pct_social_assert( '배그 2차 비밀번호' === personal_cta_social_thumbnail_primary_keyword( 7 ), 'The first Rank Math keyword must be primary.' );
+pct_social_assert( '배그 2차 비밀번호' === personal_cta_social_thumbnail_automatic_alt_text( 7 ), 'Automatic ALT must follow the current primary keyword.' );
+pct_social_assert( '배그 2차 비밀번호' === personal_cta_social_thumbnail_alt_text( 7 ), 'ALT must use the primary keyword without stuffing.' );
+$test_post_meta[7][PERSONAL_CTA_SOCIAL_ALT_META] = '배그 보안 설정 화면';
+pct_social_assert( '배그 보안 설정 화면' === personal_cta_social_thumbnail_alt_text( 7 ), 'A post-level ALT override must win.' );
+unset( $test_post_meta[7][PERSONAL_CTA_SOCIAL_ALT_META] );
+$featured_attributes = personal_cta_social_thumbnail_featured_image_alt( array( 'alt' => '' ), (object) array( 'ID' => 31 ) );
+pct_social_assert( '배그 2차 비밀번호' === $featured_attributes['alt'], 'An empty featured-image ALT must be filled at render time.' );
+$manual_attributes = personal_cta_social_thumbnail_featured_image_alt( array( 'alt' => '직접 작성한 설명' ), (object) array( 'ID' => 31 ) );
+pct_social_assert( '직접 작성한 설명' === $manual_attributes['alt'], 'A manual attachment ALT must never be overwritten.' );
+$test_post_meta[7][PERSONAL_CTA_SOCIAL_ALT_META] = '이 글에서만 쓰는 설명';
+$override_attributes = personal_cta_social_thumbnail_featured_image_alt( array( 'alt' => '미디어 설명' ), (object) array( 'ID' => 31 ) );
+pct_social_assert( '이 글에서만 쓰는 설명' === $override_attributes['alt'], 'An explicit post-level ALT must win without changing the attachment.' );
+unset( $test_post_meta[7][PERSONAL_CTA_SOCIAL_ALT_META] );
 pct_social_assert( array( 37, 99, 235 ) === personal_cta_social_thumbnail_rgb( '#2563eb' ), 'The brand color must convert to RGB.' );
 pct_social_assert(
 	array( 'social' => array( 1200, 630 ), '16x9' => array( 1200, 675 ), '4x3' => array( 1200, 900 ), '1x1' => array( 1200, 1200 ) ) === personal_cta_social_thumbnail_variants(),
@@ -183,6 +200,15 @@ $test_post_meta[7][PERSONAL_CTA_SOCIAL_THUMBNAIL_META] = array(
 	),
 );
 pct_social_assert( 'https://example.com/social.jpg' === personal_cta_social_thumbnail_rank_math_facebook( 'https://example.com/original.jpg' ), 'Generated images must replace Rank Math defaults.' );
+$facebook_alt = personal_cta_social_thumbnail_rank_math_alt( 'facebook' );
+pct_social_assert( '배그 2차 비밀번호' === $facebook_alt, 'Generated social images must use the primary keyword as ALT.' );
+ob_start();
+personal_cta_social_thumbnail_rank_math_facebook_alt();
+$facebook_alt_tag = ob_get_clean();
+ob_start();
+personal_cta_social_thumbnail_rank_math_twitter_alt();
+$twitter_alt_tag = ob_get_clean();
+pct_social_assert( false !== strpos( $facebook_alt_tag, 'property="og:image:alt"' ) && false !== strpos( $twitter_alt_tag, 'name="twitter:image:alt"' ), 'Rank Math output must include social image ALT tags.' );
 $article = personal_cta_social_thumbnail_rank_math_article( array( '@type' => 'BlogPosting', 'image' => 'https://example.com/original.jpg' ) );
 pct_social_assert( array( 'https://example.com/1x1.jpg', 'https://example.com/4x3.jpg', 'https://example.com/16x9.jpg' ) === $article['image'], 'Rank Math Article schema must receive all three recommended ratios.' );
 
@@ -231,6 +257,10 @@ if ( function_exists( 'imagecreatetruecolor' ) && function_exists( 'imagepng' ) 
 	$brand_strip = imagecolorsforindex( $output_image, imagecolorat( $output_image, 600, 625 ) );
 	pct_social_assert( 220 > $top_corner['blue'] && 28 < $brand_strip['blue'] - $brand_strip['red'], 'The image must fill the canvas and retain a blue brand strip.' );
 	imagedestroy( $output_image );
+	$clean_image  = imagecreatefromjpeg( $generated_data['variants']['16x9']['file'] );
+	$clean_bottom = imagecolorsforindex( $clean_image, imagecolorat( $clean_image, 600, 670 ) );
+	pct_social_assert( 210 > $clean_bottom['blue'] && 20 > abs( $clean_bottom['green'] - 80 ), 'Search variants must keep the clean source without a brand strip.' );
+	imagedestroy( $clean_image );
 	foreach ( array_merge( array( $source_file, $logo_file ), array_column( $generated_data['variants'], 'file' ) ) as $generated_file ) {
 		unlink( $generated_file );
 	}

@@ -9,6 +9,7 @@ define( 'PERSONAL_CTA_SOCIAL_THUMBNAIL_OPTION', 'personal_cta_social_thumbnail' 
 define( 'PERSONAL_CTA_SOCIAL_THUMBNAIL_META', '_personal_cta_social_thumbnail' );
 define( 'PERSONAL_CTA_SOCIAL_HEADLINE_META', '_personal_cta_social_headline' );
 define( 'PERSONAL_CTA_SOCIAL_FOCUS_META', '_personal_cta_social_focus' );
+define( 'PERSONAL_CTA_SOCIAL_ALT_META', '_personal_cta_social_alt' );
 define( 'PERSONAL_CTA_SOCIAL_AI_BACKGROUND_META', '_personal_cta_social_ai_background' );
 
 /** Returns the saved settings with safe defaults. */
@@ -185,6 +186,37 @@ function personal_cta_social_thumbnail_headline( $post_id ) {
 	return implode( "\n", personal_cta_social_thumbnail_headline_lines( $concise ) );
 }
 
+/** Returns Rank Math's first focus keyword, which Rank Math treats as primary. */
+function personal_cta_social_thumbnail_primary_keyword( $post_id ) {
+	$keywords = sanitize_text_field( (string) get_post_meta( $post_id, 'rank_math_focus_keyword', true ) );
+	$parts    = array_map( 'trim', explode( ',', $keywords ) );
+
+	return personal_cta_social_thumbnail_text_slice( $parts[0] ?? '', 125 );
+}
+
+/** Builds the automatic ALT without repeating the primary keyword. */
+function personal_cta_social_thumbnail_automatic_alt_text( $post_id ) {
+	$keyword = personal_cta_social_thumbnail_primary_keyword( $post_id );
+	$title   = sanitize_text_field( wp_strip_all_tags( get_the_title( $post_id ) ) );
+
+	if ( '' === $keyword ) {
+		return '';
+	}
+
+	return '' !== $title && false !== stripos( $title, $keyword )
+		? personal_cta_social_thumbnail_text_slice( $title, 125 )
+		: $keyword;
+}
+
+/** Returns a manual post override or the current automatic ALT. */
+function personal_cta_social_thumbnail_alt_text( $post_id ) {
+	$saved = sanitize_text_field( (string) get_post_meta( $post_id, PERSONAL_CTA_SOCIAL_ALT_META, true ) );
+
+	return '' !== $saved
+		? personal_cta_social_thumbnail_text_slice( $saved, 125 )
+		: personal_cta_social_thumbnail_automatic_alt_text( $post_id );
+}
+
 /** Returns the per-post cover focal point. */
 function personal_cta_social_thumbnail_focus( $post_id ) {
 	$focus = sanitize_key( get_post_meta( $post_id, PERSONAL_CTA_SOCIAL_FOCUS_META, true ) );
@@ -206,14 +238,19 @@ add_action( 'add_meta_boxes_post', 'personal_cta_social_thumbnail_add_meta_box' 
 
 /** Renders headline, focal point, preview, and the explicit AI generation button. */
 function personal_cta_social_thumbnail_render_meta_box( $post ) {
-	$headline = personal_cta_social_thumbnail_headline( $post->ID );
-	$focus    = personal_cta_social_thumbnail_focus( $post->ID );
-	$current  = personal_cta_social_thumbnail_current_data( $post->ID );
+	$headline      = personal_cta_social_thumbnail_headline( $post->ID );
+	$alt           = sanitize_text_field( (string) get_post_meta( $post->ID, PERSONAL_CTA_SOCIAL_ALT_META, true ) );
+	$automatic_alt = personal_cta_social_thumbnail_automatic_alt_text( $post->ID );
+	$focus         = personal_cta_social_thumbnail_focus( $post->ID );
+	$current       = personal_cta_social_thumbnail_current_data( $post->ID );
 	wp_nonce_field( 'personal_cta_social_thumbnail_save', 'personal_cta_social_thumbnail_nonce' );
 	?>
 	<p><label for="pct-social-headline"><strong>썸네일 문구</strong></label></p>
 	<textarea id="pct-social-headline" name="personal_cta_social_headline" rows="3" maxlength="50" class="widefat"><?php echo esc_textarea( $headline ); ?></textarea>
 	<p class="description">줄바꿈으로 흰색 첫 줄과 파란색 둘째 줄을 정합니다. 최대 두 줄입니다.</p>
+	<p><label for="pct-social-alt"><strong>이미지 대체 텍스트</strong></label></p>
+	<input id="pct-social-alt" name="personal_cta_social_alt" type="text" maxlength="125" class="widefat" value="<?php echo esc_attr( $alt ); ?>" placeholder="<?php echo esc_attr( $automatic_alt ); ?>">
+	<p class="description">직접 입력하면 이 글에서 우선합니다. 비워 두면 기존 미디어 ALT를 유지하고, 그것도 없으면 자동값 ‘<?php echo esc_html( $automatic_alt ? $automatic_alt : '포커스 키워드 필요' ); ?>’을 사용합니다.</p>
 	<p><label for="pct-social-focus"><strong>이미지 초점</strong></label><br>
 	<select id="pct-social-focus" name="personal_cta_social_focus" class="widefat">
 		<option value="left" <?php selected( 'left', $focus ); ?>>왼쪽</option>
@@ -266,8 +303,14 @@ function personal_cta_social_thumbnail_save_meta_box( $post_id ) {
 	}
 
 	$headline = isset( $_POST['personal_cta_social_headline'] ) ? personal_cta_social_thumbnail_clean_headline( wp_unslash( $_POST['personal_cta_social_headline'] ) ) : '';
+	$alt      = isset( $_POST['personal_cta_social_alt'] ) ? personal_cta_social_thumbnail_text_slice( sanitize_text_field( wp_unslash( $_POST['personal_cta_social_alt'] ) ), 125 ) : '';
 	$focus    = isset( $_POST['personal_cta_social_focus'] ) ? sanitize_key( wp_unslash( $_POST['personal_cta_social_focus'] ) ) : 'center';
 	update_post_meta( $post_id, PERSONAL_CTA_SOCIAL_HEADLINE_META, $headline );
+	if ( '' === $alt ) {
+		delete_post_meta( $post_id, PERSONAL_CTA_SOCIAL_ALT_META );
+	} else {
+		update_post_meta( $post_id, PERSONAL_CTA_SOCIAL_ALT_META, $alt );
+	}
 	update_post_meta( $post_id, PERSONAL_CTA_SOCIAL_FOCUS_META, in_array( $focus, array( 'left', 'center', 'right' ), true ) ? $focus : 'center' );
 }
 add_action( 'save_post_post', 'personal_cta_social_thumbnail_save_meta_box', 90 );
@@ -288,7 +331,7 @@ function personal_cta_social_thumbnail_render_settings_page() {
 		<?php if ( ! class_exists( 'Imagick' ) && ( ! function_exists( 'imagecreatetruecolor' ) || ! function_exists( 'imagettftext' ) || ! is_readable( personal_cta_social_thumbnail_font_path() ) ) ) : ?>
 			<div class="notice notice-error"><p>서버에 FreeType을 포함한 GD 또는 Imagick이 없어 브랜드 썸네일을 만들 수 없습니다.</p></div>
 		<?php endif; ?>
-		<p>대표이미지 또는 수동으로 만든 AI 배경에 짧은 제목과 로고를 합성해 소셜용 1200×630과 Google용 16:9·4:3·1:1 JPG를 만듭니다.</p>
+		<p>대표이미지 또는 수동으로 만든 AI 배경에서 소셜용 브랜드 1200×630과 글자 없는 검색용 16:9·4:3·1:1 JPG를 만듭니다.</p>
 		<form action="options.php" method="post">
 			<?php settings_fields( 'personal_cta_social_thumbnail' ); ?>
 			<table class="form-table" role="presentation">
@@ -495,7 +538,7 @@ function personal_cta_social_thumbnail_gd_load( $path ) {
 }
 
 /** Generates the JPG with GD. */
-function personal_cta_social_thumbnail_render_gd( $source_path, $logo_path, $target_path, $settings, $width = 1200, $height = 630, $headline = '', $focus = 'center' ) {
+function personal_cta_social_thumbnail_render_gd( $source_path, $logo_path, $target_path, $settings, $width = 1200, $height = 630, $headline = '', $focus = 'center', $branded = true ) {
 	$font_path = personal_cta_social_thumbnail_font_path();
 	if ( ! function_exists( 'imagecreatetruecolor' ) || ! function_exists( 'imagejpeg' ) || ! function_exists( 'imagettftext' ) || ! is_readable( $font_path ) ) {
 		return new WP_Error( 'pct_social_no_gd', 'GD 이미지 처리를 사용할 수 없습니다.' );
@@ -516,6 +559,12 @@ function personal_cta_social_thumbnail_render_gd( $source_path, $logo_path, $tar
 	list( $crop_x, $crop_y, $crop_width, $crop_height ) = personal_cta_social_thumbnail_cover_crop( imagesx( $source ), imagesy( $source ), $width, $height, $focus );
 	imagecopyresampled( $canvas, $source, 0, 0, $crop_x, $crop_y, $width, $height, $crop_width, $crop_height );
 	imagedestroy( $source );
+
+	if ( ! $branded ) {
+		$result = imagejpeg( $canvas, $target_path, 85 );
+		imagedestroy( $canvas );
+		return $result ? true : new WP_Error( 'pct_social_write', 'JPG 파일을 저장할 수 없습니다.' );
+	}
 
 	$brand_rgb = personal_cta_social_thumbnail_rgb( $settings['border_color'] );
 	personal_cta_social_thumbnail_gd_overlays( $canvas, $width, $height, $brand_rgb );
@@ -552,7 +601,7 @@ function personal_cta_social_thumbnail_render_gd( $source_path, $logo_path, $tar
 }
 
 /** Generates the JPG with Imagick. */
-function personal_cta_social_thumbnail_render_imagick( $source_path, $logo_path, $target_path, $settings, $width = 1200, $height = 630, $headline = '', $focus = 'center' ) {
+function personal_cta_social_thumbnail_render_imagick( $source_path, $logo_path, $target_path, $settings, $width = 1200, $height = 630, $headline = '', $focus = 'center', $branded = true ) {
 	$font_path = personal_cta_social_thumbnail_font_path();
 	if ( ! class_exists( 'Imagick' ) || ! is_readable( $font_path ) ) {
 		return new WP_Error( 'pct_social_no_imagick', 'Imagick 이미지 처리를 사용할 수 없습니다.' );
@@ -567,6 +616,15 @@ function personal_cta_social_thumbnail_render_imagick( $source_path, $logo_path,
 		$source->resizeImage( $width, $height, Imagick::FILTER_LANCZOS, 1 );
 		$canvas = $source->clone();
 		$source->clear();
+
+		if ( ! $branded ) {
+			$canvas->setImageFormat( 'jpeg' );
+			$canvas->setImageCompressionQuality( 85 );
+			$canvas->stripImage();
+			$result = $canvas->writeImage( $target_path );
+			$canvas->clear();
+			return $result ? true : new WP_Error( 'pct_social_write', 'JPG 파일을 저장할 수 없습니다.' );
+		}
 
 		$brand_rgb      = personal_cta_social_thumbnail_rgb( $settings['border_color'] );
 		$gradient_width = (int) round( $width * 0.78 );
@@ -648,13 +706,13 @@ function personal_cta_social_thumbnail_render_imagick( $source_path, $logo_path,
 }
 
 /** Uses the first server image engine that can successfully render the card. */
-function personal_cta_social_thumbnail_render( $source_path, $logo_path, $target_path, $settings, $width = 1200, $height = 630, $headline = '', $focus = 'center' ) {
-	$result = personal_cta_social_thumbnail_render_gd( $source_path, $logo_path, $target_path, $settings, $width, $height, $headline, $focus );
+function personal_cta_social_thumbnail_render( $source_path, $logo_path, $target_path, $settings, $width = 1200, $height = 630, $headline = '', $focus = 'center', $branded = true ) {
+	$result = personal_cta_social_thumbnail_render_gd( $source_path, $logo_path, $target_path, $settings, $width, $height, $headline, $focus, $branded );
 	if ( true === $result ) {
 		return true;
 	}
 
-	return personal_cta_social_thumbnail_render_imagick( $source_path, $logo_path, $target_path, $settings, $width, $height, $headline, $focus );
+	return personal_cta_social_thumbnail_render_imagick( $source_path, $logo_path, $target_path, $settings, $width, $height, $headline, $focus, $branded );
 }
 
 /** Returns a valid manually generated AI background for the current featured image. */
@@ -835,7 +893,7 @@ function personal_cta_social_thumbnail_hash( $post_id, $source_path, $logo_id, $
 				wp_json_encode( $settings ),
 				(string) $headline,
 				(string) $focus,
-				'layout-v4-full-bleed-headline',
+				'layout-v5-clean-search-variants',
 			)
 		)
 	);
@@ -905,7 +963,7 @@ function personal_cta_social_thumbnail_generate( $post_id ) {
 		$filename = 'post-' . $post_id . '-' . substr( $hash, 0, 12 ) . '-' . $name . '.jpg';
 		$file     = trailingslashit( $directory ) . $filename;
 		$temp     = trailingslashit( $directory ) . '.' . wp_generate_uuid4() . '.jpg';
-		$result   = personal_cta_social_thumbnail_render( $source_path, $logo_path, $temp, $settings, $dimensions[0], $dimensions[1], $headline, $focus );
+		$result   = personal_cta_social_thumbnail_render( $source_path, $logo_path, $temp, $settings, $dimensions[0], $dimensions[1], $headline, $focus, 'social' === $name );
 
 		if ( is_wp_error( $result ) ) {
 			if ( file_exists( $temp ) ) {
@@ -1001,6 +1059,32 @@ function personal_cta_social_thumbnail_on_meta_change( $meta_id, $post_id, $meta
 add_action( 'added_post_meta', 'personal_cta_social_thumbnail_on_meta_change', 20, 3 );
 add_action( 'updated_post_meta', 'personal_cta_social_thumbnail_on_meta_change', 20, 3 );
 
+/** Adds a post-specific ALT at render time while preserving manual attachment ALT. */
+function personal_cta_social_thumbnail_featured_image_alt( $attributes, $attachment ) {
+	$post_id = get_the_ID();
+	if ( ! $post_id || ! is_object( $attachment ) || (int) $attachment->ID !== (int) get_post_thumbnail_id( $post_id ) ) {
+		return $attributes;
+	}
+
+	$override = sanitize_text_field( (string) get_post_meta( $post_id, PERSONAL_CTA_SOCIAL_ALT_META, true ) );
+	if ( '' !== $override ) {
+		$attributes['alt'] = personal_cta_social_thumbnail_text_slice( $override, 125 );
+		return $attributes;
+	}
+
+	if ( ! empty( $attributes['alt'] ) ) {
+		return $attributes;
+	}
+
+	$alt = personal_cta_social_thumbnail_automatic_alt_text( $post_id );
+	if ( '' !== $alt ) {
+		$attributes['alt'] = $alt;
+	}
+
+	return $attributes;
+}
+add_filter( 'wp_get_attachment_image_attributes', 'personal_cta_social_thumbnail_featured_image_alt', 20, 2 );
+
 /** Detects a post-level Rank Math image that must remain higher priority. */
 function personal_cta_social_thumbnail_has_manual_rank_math_image( $post_id, $network ) {
 	$keys = 'twitter' === $network
@@ -1058,6 +1142,35 @@ function personal_cta_social_thumbnail_rank_math_twitter( $url ) {
 	return personal_cta_social_thumbnail_rank_math_image( $url, 'twitter' );
 }
 add_filter( 'rank_math/opengraph/twitter/image', 'personal_cta_social_thumbnail_rank_math_twitter', 20 );
+
+/** Returns ALT only when Rank Math is using this plugin's generated image. */
+function personal_cta_social_thumbnail_rank_math_alt( $network ) {
+	$settings = personal_cta_social_thumbnail_settings();
+	$post_id  = get_queried_object_id();
+	if ( empty( $settings['enabled'] ) || ! is_singular( 'post' ) || ! $post_id || personal_cta_social_thumbnail_has_manual_rank_math_image( $post_id, $network ) || empty( personal_cta_social_thumbnail_current_data( $post_id ) ) ) {
+		return '';
+	}
+
+	return personal_cta_social_thumbnail_alt_text( $post_id );
+}
+
+/** Outputs accessible ALT for the generated Facebook/Threads preview image. */
+function personal_cta_social_thumbnail_rank_math_facebook_alt() {
+	$alt = personal_cta_social_thumbnail_rank_math_alt( 'facebook' );
+	if ( '' !== $alt ) {
+		echo '<meta property="og:image:alt" content="' . esc_attr( $alt ) . '" />' . "\n";
+	}
+}
+add_action( 'rank_math/opengraph/facebook', 'personal_cta_social_thumbnail_rank_math_facebook_alt', 31 );
+
+/** Outputs accessible ALT for the generated X/Twitter preview image. */
+function personal_cta_social_thumbnail_rank_math_twitter_alt() {
+	$alt = personal_cta_social_thumbnail_rank_math_alt( 'twitter' );
+	if ( '' !== $alt ) {
+		echo '<meta name="twitter:image:alt" content="' . esc_attr( $alt ) . '" />' . "\n";
+	}
+}
+add_action( 'rank_math/opengraph/twitter', 'personal_cta_social_thumbnail_rank_math_twitter_alt', 31 );
 
 /** Supplies Google's recommended 1:1, 4:3, and 16:9 Article images to Rank Math. */
 function personal_cta_social_thumbnail_rank_math_article( $entity ) {
