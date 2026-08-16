@@ -32,6 +32,8 @@ foreach ($linkValue in @('noopener', 'nofollow', 'sponsored', 'target="_blank"')
 	'includes\threads-core.php',
 	'includes\threads-openai.php',
 	'includes\threads-admin.php',
+	'assets\fonts\Pretendard-ExtraBold.otf',
+	'assets\fonts\LICENSE-Pretendard.txt',
 	'assets\threads-editor-panel.js',
 	'assets\threads-editor-panel.css'
 ) |
@@ -51,6 +53,8 @@ if (Test-Path $archivePath) {
 			'personal-cta-blocks/includes/threads-core.php',
 			'personal-cta-blocks/includes/threads-openai.php',
 			'personal-cta-blocks/includes/threads-admin.php',
+			'personal-cta-blocks/assets/fonts/Pretendard-ExtraBold.otf',
+			'personal-cta-blocks/assets/fonts/LICENSE-Pretendard.txt',
 			'personal-cta-blocks/assets/threads-editor-panel.js',
 			'personal-cta-blocks/assets/threads-editor-panel.css'
 		)

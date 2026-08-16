@@ -75,6 +75,8 @@ try {
 		"$slug/includes/threads-daily.php",
 		"$slug/includes/threads-admin.php",
 		"$slug/includes/social-thumbnail.php",
+		"$slug/assets/fonts/Pretendard-ExtraBold.otf",
+		"$slug/assets/fonts/LICENSE-Pretendard.txt",
 		"$slug/assets/threads-editor-panel.js",
 		"$slug/assets/threads-editor-panel.css"
 	)
