@@ -74,6 +74,7 @@ try {
 		"$slug/includes/threads-meta.php",
 		"$slug/includes/threads-daily.php",
 		"$slug/includes/threads-admin.php",
+		"$slug/includes/social-thumbnail.php",
 		"$slug/assets/threads-editor-panel.js",
 		"$slug/assets/threads-editor-panel.css"
 	)

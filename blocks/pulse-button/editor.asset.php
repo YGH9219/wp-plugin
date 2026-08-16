@@ -8,5 +8,5 @@ return array(
 		'wp-element',
 		'wp-i18n',
 	),
-	'version'      => '0.7.1',
+	'version'      => '0.8.0',
 );

@@ -22,5 +22,5 @@ jobs:
           & ./scripts/build-plugin.ps1
           & ./tests/verify-pulse-button.ps1
           $mount = "type=bind,source=$env:GITHUB_WORKSPACE,target=/app"
-          docker run --rm --mount $mount -w /app php:7.4-cli sh -lc "find . -path ./dist -prune -o -type f -name '*.php' -print0 | xargs -0 -n1 php -l && php tests/verify-github-updater.php && php tests/verify-threads.php"
-          docker run --rm --mount $mount -w /app php:8.3-cli sh -lc "find . -path ./dist -prune -o -type f -name '*.php' -print0 | xargs -0 -n1 php -l && php tests/verify-github-updater.php && php tests/verify-threads.php"
+          docker run --rm --mount $mount -w /app php:7.4-cli sh -lc "find . -path ./dist -prune -o -type f -name '*.php' -print0 | xargs -0 -n1 php -l && php tests/verify-github-updater.php && php tests/verify-social-thumbnail.php && php tests/verify-threads.php"
+          docker run --rm --mount $mount -w /app php:8.3-cli sh -lc "find . -path ./dist -prune -o -type f -name '*.php' -print0 | xargs -0 -n1 php -l && php tests/verify-github-updater.php && php tests/verify-social-thumbnail.php && php tests/verify-threads.php"

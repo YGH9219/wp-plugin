@@ -4,6 +4,9 @@ WordPress용 펄스 CTA 블록과 AI Threads 문구 생성·자동 게시 기능
 
 - 글 편집기에서 `/ㅂㅌ`으로 반응형 CTA 버튼 추가
 - CTA 버튼별 새 탭, `nofollow`, `sponsored` 링크 설정
+- 대표이미지를 원본 보존한 채 소셜·Google 검색용 4종 브랜드 JPG로 자동 생성
+- 사이트 로고 기본 사용, 별도 로고·위치·테두리 색상 설정
+- Rank Math의 Facebook·Threads·X 이미지에 자동 연결
 - 글 편집기 상단의 `Threads 문구` 아이콘에서 문구 생성
 - 저장된 원문 전체와 관리자가 등록한 합격 예시를 한 번에 읽는 AI Composer
 - 정상 생성은 OpenAI 호출 1회, 500자 초과일 때만 한 번 축약
@@ -19,6 +22,7 @@ Threads 기능과 일상글 자동 게시는 기본적으로 꺼져 있으며, �
 
 - WordPress 6.3 이상
 - PHP 7.4 이상
+- GD 또는 Imagick 이미지 확장
 - OpenAI API 키
 - 자동 게시 사용 시 Meta Threads App과 `threads_basic`, `threads_content_publish` 권한
 - 생성 작업을 이어서 실행할 수 있는 WP-Cron
@@ -72,6 +76,14 @@ define( 'PERSONAL_CTA_THREADS_ACCESS_TOKEN', '...');
 
 모델은 URL을 만들지 않습니다. 링크 포함을 켜면 PHP가 공개 글 링크와 선택적인 UTM을 문구 끝에 붙이고, 이 링크 길이까지 Threads 500자 제한에 포함해 계산합니다.
 
+## 소셜 썸네일
+
+`설정 → 소셜 썸네일`에서 기능과 로고를 설정합니다. 별도 로고를 고르지 않으면 현재 테마의 사이트 로고를 사용합니다. 대표이미지를 저장하면 원본은 건드리지 않고 업로드 폴더의 `personal-cta-social` 디렉터리에 1200×630, 1200×675, 1200×900, 1200×1200 JPG를 새로 만듭니다.
+
+Rank Math가 활성화되어 있으면 1200×630 JPG를 Facebook·Threads용 Open Graph 이미지와 X 이미지로 사용하고, Article 스키마의 `image`에는 1:1·4:3·16:9 JPG를 연결합니다. 글의 Rank Math 소셜 탭에서 이미지를 직접 지정한 경우에는 직접 지정한 소셜 이미지가 우선합니다. 기존 글은 글을 업데이트하거나 대표이미지를 다시 선택하면 생성됩니다.
+
+1200×630은 1.91:1 표준 링크 카드에 맞춘 크기입니다. 플랫폼의 정사각형·소형 목록 화면에서는 중앙 재단될 수 있으므로 로고와 핵심 내용은 가장자리에서 떨어뜨려 배치합니다. 모든 서비스와 화면에서 무재단을 보장하려면 플랫폼별 별도 이미지를 만들어야 합니다.
+
 ## 일상글 하루 5개
 
 Threads 계정 연결 후 `일상글 자동 게시 → 하루 5개`를 켜면 다음 게시 가능일의 문구 5개를 OpenAI 요청 한 번으로 생성합니다. 개인 메모가 없는 기본 모드에서는 실제 방문·구매·대화·직장 사건을 지어내지 않고, 40대의 차분한 생활 관찰과 생각을 작성합니다.
@@ -94,7 +106,7 @@ Threads 계정 연결 후 `일상글 자동 게시 → 하루 5개`를 켜면 �
 & .\tests\verify-pulse-button.ps1
 
 $mount = "type=bind,source=$PWD,target=/app,readonly"
-docker run --rm --mount $mount -w /app php:7.4-cli sh -lc "find . -path ./dist -prune -o -type f -name '*.php' -print0 | xargs -0 -n1 php -l && php tests/verify-github-updater.php && php tests/verify-threads.php"
+docker run --rm --mount $mount -w /app php:7.4-cli sh -lc "find . -path ./dist -prune -o -type f -name '*.php' -print0 | xargs -0 -n1 php -l && php tests/verify-github-updater.php && php tests/verify-social-thumbnail.php && php tests/verify-threads.php"
 
 & .\scripts\build-plugin.ps1
 ```
