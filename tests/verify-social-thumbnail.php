@@ -11,13 +11,16 @@ $test_post_meta     = array();
 $test_thumbnail_ids = array( 7 => 31 );
 $test_attachment_files = array();
 $test_uploads_directory = '';
-$test_titles        = array( 7 => '배그 2차 비번 해제 방법' );
+$test_titles        = array( 7 => '배그 2차 비번 해제 방법', 8 => '자동 임시글' );
+$test_post_statuses = array( 7 => 'publish', 8 => 'auto-draft' );
 $test_remote_response = array();
 $test_remote_request  = array();
+$test_next_attachment_id = 100;
 $test_queried_id    = 7;
 $test_is_singular   = true;
 
 function add_action() {}
+function remove_action() {}
 function add_filter() {}
 class WP_Error {
 	private $message;
@@ -34,10 +37,19 @@ function sanitize_key( $value ) { return preg_replace( '/[^a-z0-9_-]/', '', strt
 function sanitize_text_field( $value ) { return trim( strip_tags( (string) $value ) ); }
 function sanitize_textarea_field( $value ) { return trim( strip_tags( (string) $value ) ); }
 function sanitize_hex_color( $value ) { return is_string( $value ) && preg_match( '/^#[0-9a-f]{6}$/i', $value ) ? strtolower( $value ) : null; }
+function wp_unslash( $value ) { return $value; }
+function wp_verify_nonce() { return true; }
+function current_user_can() { return true; }
+function wp_is_post_revision() { return false; }
+function wp_is_post_autosave() { return false; }
 function wp_strip_all_tags( $value ) { return strip_tags( (string) $value ); }
 function get_the_title( $post_id ) {
 	global $test_titles;
 	return isset( $test_titles[ $post_id ] ) ? $test_titles[ $post_id ] : '';
+}
+function get_post_status( $post_id ) {
+	global $test_post_statuses;
+	return isset( $test_post_statuses[ $post_id ] ) ? $test_post_statuses[ $post_id ] : false;
 }
 function get_post_field( $field, $post_id ) { return '계정 보안을 위해 2차 비밀번호를 초기화하는 방법을 설명합니다.'; }
 function strip_shortcodes( $value ) { return $value; }
@@ -76,6 +88,38 @@ function wp_json_encode( $value ) { return json_encode( $value ); }
 function wp_upload_dir() {
 	global $test_uploads_directory;
 	return array( 'basedir' => $test_uploads_directory, 'baseurl' => 'https://example.com/uploads', 'error' => false );
+}
+function wp_upload_bits( $name, $deprecated, $bits ) {
+	global $test_uploads_directory;
+	$directory = $test_uploads_directory . '/media';
+	if ( ! is_dir( $directory ) ) { mkdir( $directory, 0777, true ); }
+	$file = $directory . '/' . uniqid() . '-' . $name;
+	return false !== file_put_contents( $file, $bits )
+		? array( 'file' => $file, 'url' => 'https://example.com/uploads/media/' . basename( $file ), 'type' => 'image/jpeg', 'error' => false )
+		: array( 'error' => 'write' );
+}
+function wp_insert_attachment( $attachment, $file, $post_id, $wp_error ) {
+	global $test_next_attachment_id, $test_attachment_files, $test_attachments;
+	$id = $test_next_attachment_id++;
+	$test_attachment_files[ $id ] = $file;
+	$test_attachments[ $id ] = true;
+	return $id;
+}
+function wp_generate_attachment_metadata( $attachment_id, $file ) { return array( 'file' => basename( $file ) ); }
+function wp_update_attachment_metadata( $attachment_id, $metadata ) { return true; }
+function set_post_thumbnail( $post_id, $attachment_id ) {
+	global $test_thumbnail_ids;
+	$test_thumbnail_ids[ $post_id ] = $attachment_id;
+	return true;
+}
+function wp_delete_attachment( $attachment_id, $force_delete = false ) {
+	global $test_attachment_files, $test_attachments, $test_post_meta, $test_thumbnail_ids;
+	if ( ! empty( $test_attachment_files[ $attachment_id ] ) && is_file( $test_attachment_files[ $attachment_id ] ) ) { unlink( $test_attachment_files[ $attachment_id ] ); }
+	unset( $test_attachment_files[ $attachment_id ], $test_attachments[ $attachment_id ], $test_post_meta[ $attachment_id ] );
+	foreach ( $test_thumbnail_ids as $post_id => $thumbnail_id ) {
+		if ( (int) $thumbnail_id === (int) $attachment_id ) { $test_thumbnail_ids[ $post_id ] = 0; }
+	}
+	return true;
 }
 function trailingslashit( $value ) { return rtrim( $value, '/\\' ) . '/'; }
 function wp_mkdir_p( $directory ) { return is_dir( $directory ) || mkdir( $directory, 0777, true ); }
@@ -141,6 +185,17 @@ pct_social_assert( array( 307, 546 ) === personal_cta_social_thumbnail_contain( 
 pct_social_assert( array( 0, 30, 1600, 840 ) === personal_cta_social_thumbnail_cover_crop( 1600, 900, 1200, 630 ), 'Cover crop must remove only excess height.' );
 pct_social_assert( array( 476, 0, 1524, 800 ) === personal_cta_social_thumbnail_cover_crop( 2000, 800, 1200, 630, 'right' ), 'Right focus must preserve the right edge.' );
 pct_social_assert( array( '배그 2차 비번', '해제 방법' ) === personal_cta_social_thumbnail_headline_lines( '배그 2차 비번 해제 방법' ), 'One concise phrase must balance into two readable lines.' );
+pct_social_assert( '' === personal_cta_social_thumbnail_headline( 8 ), 'A new auto-draft must not use WordPress\'s temporary title as its thumbnail headline.' );
+$test_post_statuses[8] = 'draft';
+$test_titles[8]        = '경제 뉴스 쉽게 읽는 법';
+$_POST = array(
+	'personal_cta_social_thumbnail_nonce' => 'valid',
+	'personal_cta_social_headline'         => '',
+	'personal_cta_social_headline_default' => '',
+);
+personal_cta_social_thumbnail_save_meta_box( 8 );
+pct_social_assert( "경제 뉴스\n쉽게 읽는 법" === personal_cta_social_thumbnail_headline( 8 ), 'The first real save must replace the temporary title with the saved post title.' );
+$_POST = array();
 $test_post_meta[7]['rank_math_focus_keyword'] = '배그 2차 비밀번호, 계정 보안';
 pct_social_assert( '배그 2차 비밀번호' === personal_cta_social_thumbnail_primary_keyword( 7 ), 'The first Rank Math keyword must be primary.' );
 pct_social_assert( '배그 2차 비밀번호' === personal_cta_social_thumbnail_automatic_alt_text( 7 ), 'Automatic ALT must follow the current primary keyword.' );
@@ -181,6 +236,21 @@ $ai_error      = is_wp_error( $ai_background ) ? ' ' . $ai_background->get_error
 pct_social_assert( ! is_wp_error( $ai_background ) && is_readable( $ai_background['file'] ), 'A valid Image API response must be stored as a reusable background.' . $ai_error );
 pct_social_assert( 'https://api.openai.com/v1/images/generations' === $test_remote_request['url'] && 'gpt-image-2' === $ai_payload['model'] && '1920x1008' === $ai_payload['size'], 'AI generation must use the bounded image endpoint and landscape size.' );
 pct_social_assert( false !== strpos( $ai_payload['prompt'], 'Do not render any text' ), 'The AI prompt must reserve text and branding for deterministic rendering.' );
+$featured_id = personal_cta_social_thumbnail_set_featured(
+	7,
+	array(
+		'file'        => $ai_background['file'],
+		'url'         => $ai_background['url'],
+		'source_id'   => 31,
+		'source_kind' => 'ai',
+	)
+);
+pct_social_assert( ! is_wp_error( $featured_id ) && $featured_id === get_post_thumbnail_id( 7 ), 'The final AI card must become a real WordPress featured-image attachment.' );
+pct_social_assert( '배그 2차 비밀번호' === get_post_meta( $featured_id, '_wp_attachment_image_alt', true ), 'The generated featured image must receive the Rank Math primary keyword ALT.' );
+pct_social_assert( $featured_id === (int) $test_post_meta[7][PERSONAL_CTA_SOCIAL_AI_BACKGROUND_META]['featured_id'] && $featured_id === (int) $test_post_meta[7][PERSONAL_CTA_SOCIAL_THUMBNAIL_META]['attachment_id'], 'AI and social metadata must follow the new featured image without triggering nested generation.' );
+wp_delete_attachment( $featured_id, true );
+$test_thumbnail_ids[7] = 31;
+rmdir( $test_uploads_directory . '/media' );
 unlink( $ai_background['file'] );
 rmdir( $test_uploads_directory . '/personal-cta-social' );
 rmdir( $test_uploads_directory );

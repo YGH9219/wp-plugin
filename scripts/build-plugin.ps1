@@ -75,10 +75,12 @@ try {
 		"$slug/includes/threads-daily.php",
 		"$slug/includes/threads-admin.php",
 		"$slug/includes/social-thumbnail.php",
+		"$slug/includes/inline-images.php",
 		"$slug/assets/fonts/Pretendard-ExtraBold.otf",
 		"$slug/assets/fonts/LICENSE-Pretendard.txt",
 		"$slug/assets/threads-editor-panel.js",
-		"$slug/assets/threads-editor-panel.css"
+		"$slug/assets/threads-editor-panel.css",
+		"$slug/assets/inline-images-editor.js"
 	)
 	$missingEntries = @($requiredEntries | Where-Object { $entryNames -notcontains $_ })
 	if ($missingEntries.Count -eq 0 -and $entryNames -notmatch '\\') {

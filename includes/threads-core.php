@@ -547,14 +547,18 @@ function personal_cta_threads_payload_text( $post_id, $body ) {
 /**
  * Acquires a per-post option lock. Native add_option() supplies the unique key.
  *
- * @param int $post_id Post ID.
- * @param int $ttl Lock lifetime.
+ * @param int    $post_id Post ID.
+ * @param int    $ttl Lock lifetime.
+ * @param string $scope Internal task scope. The default preserves the original Threads lock key.
  * @return array<string, string|int>|WP_Error
  */
-function personal_cta_threads_lock( $post_id, $ttl = 300 ) {
+function personal_cta_threads_lock( $post_id, $ttl = 300, $scope = 'threads' ) {
 	global $wpdb;
 
-	$key   = 'personal_cta_threads_' . (int) $post_id . '.lock';
+	$scope = sanitize_key( $scope );
+	$key   = 'threads' === $scope || '' === $scope
+		? 'personal_cta_threads_' . (int) $post_id . '.lock'
+		: 'personal_cta_' . $scope . '_' . (int) $post_id . '.lock';
 	$token = function_exists( 'wp_generate_uuid4' ) ? wp_generate_uuid4() : uniqid( 'pct_', true );
 	$value = wp_json_encode( array( 'token' => $token, 'expires' => time() + max( 60, (int) $ttl ) ) );
 

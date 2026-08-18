@@ -174,6 +174,10 @@ function personal_cta_social_thumbnail_headline_lines( $headline ) {
 
 /** Returns the saved headline or a concise title-derived fallback. */
 function personal_cta_social_thumbnail_headline( $post_id ) {
+	if ( 'auto-draft' === get_post_status( $post_id ) ) {
+		return '';
+	}
+
 	$saved = personal_cta_social_thumbnail_clean_headline( get_post_meta( $post_id, PERSONAL_CTA_SOCIAL_HEADLINE_META, true ) );
 	if ( '' !== $saved ) {
 		return $saved;
@@ -238,7 +242,8 @@ add_action( 'add_meta_boxes_post', 'personal_cta_social_thumbnail_add_meta_box' 
 
 /** Renders headline, focal point, preview, and the explicit AI generation button. */
 function personal_cta_social_thumbnail_render_meta_box( $post ) {
-	$headline      = personal_cta_social_thumbnail_headline( $post->ID );
+	$saved_headline = personal_cta_social_thumbnail_clean_headline( get_post_meta( $post->ID, PERSONAL_CTA_SOCIAL_HEADLINE_META, true ) );
+	$headline       = personal_cta_social_thumbnail_headline( $post->ID );
 	$alt           = sanitize_text_field( (string) get_post_meta( $post->ID, PERSONAL_CTA_SOCIAL_ALT_META, true ) );
 	$automatic_alt = personal_cta_social_thumbnail_automatic_alt_text( $post->ID );
 	$focus         = personal_cta_social_thumbnail_focus( $post->ID );
@@ -247,7 +252,8 @@ function personal_cta_social_thumbnail_render_meta_box( $post ) {
 	?>
 	<p><label for="pct-social-headline"><strong>썸네일 문구</strong></label></p>
 	<textarea id="pct-social-headline" name="personal_cta_social_headline" rows="3" maxlength="50" class="widefat"><?php echo esc_textarea( $headline ); ?></textarea>
-	<p class="description">줄바꿈으로 흰색 첫 줄과 파란색 둘째 줄을 정합니다. 최대 두 줄입니다.</p>
+	<input type="hidden" name="personal_cta_social_headline_default" value="<?php echo esc_attr( '' === $saved_headline ? $headline : '' ); ?>">
+	<p class="description">새 글은 저장한 제목으로 자동 채웁니다. 직접 수정하면 최대 두 줄의 고정 문구로 사용합니다.</p>
 	<p><label for="pct-social-alt"><strong>이미지 대체 텍스트</strong></label></p>
 	<input id="pct-social-alt" name="personal_cta_social_alt" type="text" maxlength="125" class="widefat" value="<?php echo esc_attr( $alt ); ?>" placeholder="<?php echo esc_attr( $automatic_alt ); ?>">
 	<p class="description">직접 입력하면 이 글에서 우선합니다. 비워 두면 기존 미디어 ALT를 유지하고, 그것도 없으면 자동값 ‘<?php echo esc_html( $automatic_alt ? $automatic_alt : '포커스 키워드 필요' ); ?>’을 사용합니다.</p>
@@ -281,7 +287,10 @@ function personal_cta_social_thumbnail_render_meta_box( $post ) {
 			}).done(function (response) {
 				if (response.success) {
 					$('#pct-social-editor-preview').html($('<img>', { src: response.data.url + '?v=' + Date.now(), css: { display: 'block', width: '100%', height: 'auto' } }));
-					status.text('AI 배경과 브랜드 썸네일을 만들었습니다.');
+					if (window.wp && wp.data && response.data.attachment_id) {
+						wp.data.dispatch('core/editor').editPost({ featured_media: response.data.attachment_id });
+					}
+					status.text('AI 배경과 브랜드 썸네일을 만들고 대표이미지로 설정했습니다.');
 				} else {
 					status.text(response.data && response.data.message ? response.data.message : 'AI 배경을 만들지 못했습니다.');
 				}
@@ -302,10 +311,15 @@ function personal_cta_social_thumbnail_save_meta_box( $post_id ) {
 		return;
 	}
 
-	$headline = isset( $_POST['personal_cta_social_headline'] ) ? personal_cta_social_thumbnail_clean_headline( wp_unslash( $_POST['personal_cta_social_headline'] ) ) : '';
-	$alt      = isset( $_POST['personal_cta_social_alt'] ) ? personal_cta_social_thumbnail_text_slice( sanitize_text_field( wp_unslash( $_POST['personal_cta_social_alt'] ) ), 125 ) : '';
-	$focus    = isset( $_POST['personal_cta_social_focus'] ) ? sanitize_key( wp_unslash( $_POST['personal_cta_social_focus'] ) ) : 'center';
-	update_post_meta( $post_id, PERSONAL_CTA_SOCIAL_HEADLINE_META, $headline );
+	$headline           = isset( $_POST['personal_cta_social_headline'] ) ? personal_cta_social_thumbnail_clean_headline( wp_unslash( $_POST['personal_cta_social_headline'] ) ) : '';
+	$automatic_headline = isset( $_POST['personal_cta_social_headline_default'] ) ? personal_cta_social_thumbnail_clean_headline( wp_unslash( $_POST['personal_cta_social_headline_default'] ) ) : '';
+	$alt                = isset( $_POST['personal_cta_social_alt'] ) ? personal_cta_social_thumbnail_text_slice( sanitize_text_field( wp_unslash( $_POST['personal_cta_social_alt'] ) ), 125 ) : '';
+	$focus              = isset( $_POST['personal_cta_social_focus'] ) ? sanitize_key( wp_unslash( $_POST['personal_cta_social_focus'] ) ) : 'center';
+	if ( '' === $headline || $headline === $automatic_headline ) {
+		delete_post_meta( $post_id, PERSONAL_CTA_SOCIAL_HEADLINE_META );
+	} else {
+		update_post_meta( $post_id, PERSONAL_CTA_SOCIAL_HEADLINE_META, $headline );
+	}
 	if ( '' === $alt ) {
 		delete_post_meta( $post_id, PERSONAL_CTA_SOCIAL_ALT_META );
 	} else {
@@ -874,7 +888,13 @@ function personal_cta_social_thumbnail_ajax_ai_background() {
 		wp_send_json_error( array( 'message' => $result->get_error_message() ), 500 );
 	}
 
-	wp_send_json_success( array( 'url' => $result ) );
+	$data = get_post_meta( $post_id, PERSONAL_CTA_SOCIAL_THUMBNAIL_META, true );
+	wp_send_json_success(
+		array(
+			'url'           => $result,
+			'attachment_id' => (int) ( $data['attachment_id'] ?? 0 ),
+		)
+	);
 }
 add_action( 'wp_ajax_personal_cta_social_ai_background', 'personal_cta_social_thumbnail_ajax_ai_background' );
 
@@ -915,6 +935,71 @@ function personal_cta_social_thumbnail_variants_ready( $data ) {
 	return true;
 }
 
+/** Copies the final social card into the Media Library and makes it the featured image. */
+function personal_cta_social_thumbnail_set_featured( $post_id, $data ) {
+	if ( empty( $data['file'] ) || ! is_readable( $data['file'] ) ) {
+		return new WP_Error( 'pct_social_featured_file', '대표이미지로 등록할 썸네일 파일을 읽을 수 없습니다.' );
+	}
+
+	$bytes  = file_get_contents( $data['file'] );
+	$upload = false !== $bytes ? wp_upload_bits( 'post-' . (int) $post_id . '-ai-thumbnail.jpg', null, $bytes ) : array( 'error' => 'read' );
+	if ( ! empty( $upload['error'] ) || empty( $upload['file'] ) || empty( $upload['url'] ) ) {
+		return new WP_Error( 'pct_social_featured_upload', '완성된 썸네일을 미디어 라이브러리에 저장할 수 없습니다.' );
+	}
+
+	$attachment_id = wp_insert_attachment(
+		array(
+			'post_mime_type' => 'image/jpeg',
+			'post_title'     => sanitize_text_field( wp_strip_all_tags( get_the_title( $post_id ) ) ),
+			'post_status'    => 'inherit',
+			'post_parent'    => $post_id,
+		),
+		$upload['file'],
+		$post_id,
+		true
+	);
+	if ( is_wp_error( $attachment_id ) ) {
+		wp_delete_file( $upload['file'] );
+		return new WP_Error( 'pct_social_featured_attachment', '완성된 썸네일을 미디어 항목으로 등록할 수 없습니다.' );
+	}
+
+	if ( ! function_exists( 'wp_generate_attachment_metadata' ) ) {
+		require_once ABSPATH . 'wp-admin/includes/image.php';
+	}
+	$metadata = wp_generate_attachment_metadata( $attachment_id, $upload['file'] );
+	if ( is_array( $metadata ) ) {
+		wp_update_attachment_metadata( $attachment_id, $metadata );
+	}
+	update_post_meta( $attachment_id, '_wp_attachment_image_alt', personal_cta_social_thumbnail_alt_text( $post_id ) );
+	update_post_meta( $attachment_id, '_personal_cta_social_generated_for', (int) $post_id );
+
+	$old_attachment_id = (int) get_post_thumbnail_id( $post_id );
+	remove_action( 'added_post_meta', 'personal_cta_social_thumbnail_on_meta_change', 20 );
+	remove_action( 'updated_post_meta', 'personal_cta_social_thumbnail_on_meta_change', 20 );
+	set_post_thumbnail( $post_id, $attachment_id );
+	add_action( 'added_post_meta', 'personal_cta_social_thumbnail_on_meta_change', 20, 3 );
+	add_action( 'updated_post_meta', 'personal_cta_social_thumbnail_on_meta_change', 20, 3 );
+	if ( (int) get_post_thumbnail_id( $post_id ) !== (int) $attachment_id ) {
+		wp_delete_attachment( $attachment_id, true );
+		return new WP_Error( 'pct_social_featured_set', '생성한 이미지를 대표이미지로 설정할 수 없습니다.' );
+	}
+
+	$background = get_post_meta( $post_id, PERSONAL_CTA_SOCIAL_AI_BACKGROUND_META, true );
+	if ( is_array( $background ) ) {
+		$background['featured_id'] = (int) $attachment_id;
+		update_post_meta( $post_id, PERSONAL_CTA_SOCIAL_AI_BACKGROUND_META, $background );
+	}
+	$data['source_id']     = (int) $attachment_id;
+	$data['attachment_id'] = (int) $attachment_id;
+	update_post_meta( $post_id, PERSONAL_CTA_SOCIAL_THUMBNAIL_META, $data );
+
+	if ( $old_attachment_id && $old_attachment_id !== (int) $attachment_id && (int) get_post_meta( $old_attachment_id, '_personal_cta_social_generated_for', true ) === (int) $post_id ) {
+		wp_delete_attachment( $old_attachment_id, true );
+	}
+
+	return $attachment_id;
+}
+
 /** Generates or reuses the social JPG for a post. */
 function personal_cta_social_thumbnail_generate( $post_id ) {
 	$post_id  = absint( $post_id );
@@ -945,6 +1030,12 @@ function personal_cta_social_thumbnail_generate( $post_id ) {
 	$current   = get_post_meta( $post_id, PERSONAL_CTA_SOCIAL_THUMBNAIL_META, true );
 
 	if ( is_array( $current ) && $hash === ( $current['hash'] ?? '' ) && personal_cta_social_thumbnail_variants_ready( $current ) ) {
+		if ( 'ai' === $source['kind'] && (int) ( $current['attachment_id'] ?? 0 ) !== (int) get_post_thumbnail_id( $post_id ) ) {
+			$featured = personal_cta_social_thumbnail_set_featured( $post_id, $current );
+			if ( is_wp_error( $featured ) ) {
+				return $featured;
+			}
+		}
 		return $current['url'];
 	}
 
@@ -1034,6 +1125,12 @@ function personal_cta_social_thumbnail_generate( $post_id ) {
 			if ( '' !== $old_file && 0 === strpos( $old_file, $directory_prefix ) && ! in_array( $old_file, $new_files, true ) && is_file( $old_file ) ) {
 				wp_delete_file( $old_file );
 			}
+		}
+	}
+	if ( 'ai' === $source['kind'] ) {
+		$featured = personal_cta_social_thumbnail_set_featured( $post_id, $data );
+		if ( is_wp_error( $featured ) ) {
+			return $featured;
 		}
 	}
 

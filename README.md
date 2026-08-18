@@ -1,6 +1,6 @@
 # Personal CTA Blocks
 
-WordPress용 펄스 CTA 블록, AI 브랜드 썸네일, AI Threads 문구 생성·자동 게시 기능을 한 플러그인으로 제공합니다.
+WordPress용 펄스 CTA 블록, AI 브랜드·본문 이미지, AI Threads 문구 생성·자동 게시 기능을 한 플러그인으로 제공합니다.
 
 - 글 편집기에서 `/ㅂㅌ`으로 반응형 CTA 버튼 추가
 - CTA 버튼별 새 탭, `nofollow`, `sponsored` 링크 설정
@@ -8,6 +8,7 @@ WordPress용 펄스 CTA 블록, AI 브랜드 썸네일, AI Threads 문구 생성
 - Rank Math의 첫 번째 포커스 키워드로 비어 있는 대표이미지 ALT와 소셜 이미지 ALT 자동 보완
 - 두 줄 문구·이미지 초점·사이트 로고·브랜드 색상 설정
 - Rank Math의 Facebook·Threads·X 이미지에 자동 연결
+- Gutenberg의 H2/H3를 골라 1200×800 정보성 본문 이미지를 생성하고 바로 아래에 삽입
 - 글 편집기 상단의 `Threads 문구` 아이콘에서 문구 생성
 - 저장된 원문 전체와 관리자가 등록한 합격 예시를 한 번에 읽는 AI Composer
 - 정상 생성은 OpenAI 호출 1회, 500자 초과일 때만 한 번 축약
@@ -81,11 +82,19 @@ define( 'PERSONAL_CTA_THREADS_ACCESS_TOKEN', '...');
 
 `설정 → 브랜드 썸네일`에서 기능·로고·브랜드 색상을 정합니다. 별도 로고를 고르지 않으면 현재 테마의 사이트 로고를 사용합니다. 글 편집 화면의 `브랜드 썸네일` 패널에서는 최대 두 줄 문구, 이미지 초점과 ALT를 정합니다. ALT는 Rank Math의 첫 번째 포커스 키워드를 기본값으로 사용하며 직접 작성한 값이 항상 우선합니다.
 
-대표이미지를 저장하면 원본은 건드리지 않고 업로드 폴더의 `personal-cta-social` 디렉터리에 JPG 4종을 새로 만듭니다. 1200×630은 로고와 최대 두 줄 문구가 있는 Facebook·Threads·X용이고, 1200×675·1200×900·1200×1200은 글자와 로고가 없는 Google·Article용입니다. `AI 배경 생성`은 설정된 OpenAI 키로 글 내용에 맞는 글자 없는 배경을 한 번 생성한 뒤 이 4종으로 가공합니다. 저장할 때 자동으로 OpenAI를 호출하지 않으므로 버튼을 누른 경우에만 이미지 API 비용이 발생합니다.
+대표이미지를 저장하면 원본은 건드리지 않고 업로드 폴더의 `personal-cta-social` 디렉터리에 JPG 4종을 새로 만듭니다. 1200×630은 로고와 최대 두 줄 문구가 있는 Facebook·Threads·X용이고, 1200×675·1200×900·1200×1200은 글자와 로고가 없는 Google·Article용입니다. `AI 배경 생성`은 설정된 OpenAI 키로 글 내용에 맞는 글자 없는 배경을 한 번 생성한 뒤 이 4종으로 가공하고, 완성된 1200×630 이미지를 미디어 라이브러리에 등록해 대표이미지로 설정합니다. 저장할 때 자동으로 OpenAI를 호출하지 않으므로 버튼을 누른 경우에만 이미지 API 비용이 발생합니다.
 
 Rank Math가 활성화되어 있으면 1200×630 JPG를 Facebook·Threads용 Open Graph 이미지와 X 이미지로 사용하고, Article 스키마의 `image`에는 1:1·4:3·16:9 JPG를 연결합니다. 글의 Rank Math 소셜 탭에서 이미지를 직접 지정한 경우에는 직접 지정한 소셜 이미지가 우선합니다.
 
 AI 배경은 `gpt-image-2`의 1920×1008 JPG로 생성합니다. 공급자 응답이 실패하거나 차단되면 기존 대표이미지는 그대로 남으며 오류만 표시합니다. 이미지 생성에는 계정 상태에 따라 조직 인증이나 사용 가능한 결제 한도가 필요할 수 있습니다. 공식 동작과 제한은 [OpenAI 이미지 생성 문서](https://developers.openai.com/api/docs/guides/image-generation)를 참고하세요.
+
+## 본문 AI 이미지
+
+Gutenberg 오른쪽 문서 설정의 `본문 AI 이미지`에서 H2/H3 소제목을 최대 5개 고른 뒤 `선택 N개 생성`을 누릅니다. 플러그인은 글 제목, 해당 소제목과 다음 소제목 전까지의 문맥을 사용해 글자·로고·워터마크·가짜 UI가 없는 1200×800 정보성 JPG를 한 장씩 만들고, 미디어 라이브러리에 등록한 뒤 각 소제목 바로 아래에 일반 `이미지` 블록으로 넣습니다. 기존에 직접 넣은 이미지는 교체하지 않습니다.
+
+같은 제목·소제목·문맥으로 다시 실행하면 기존 미디어를 재사용하므로 API 비용이 다시 들지 않습니다. 다른 결과가 필요할 때만 `같은 내용도 새 이미지로 다시 만들기`를 켭니다. ALT는 소제목에서 자연스럽게 만들며 키워드를 반복해서 넣지 않습니다. 생성 결과를 확인한 뒤 글의 `업데이트` 또는 `저장`을 눌러 본문 변경을 확정합니다.
+
+미디어 원본은 서비스 호환성이 높은 JPG로 보관합니다. Converter for Media 같은 이미지 변환 플러그인이 활성화되어 있으면 그 플러그인이 방문자 브라우저에 WebP/AVIF 파생 이미지를 전달하도록 맡기므로, 이 기능이 별도로 AVIF 파일을 만들지는 않습니다.
 
 ## 일상글 하루 5개
 
@@ -109,7 +118,7 @@ Threads 계정 연결 후 `일상글 자동 게시 → 하루 5개`를 켜면 �
 & .\tests\verify-pulse-button.ps1
 
 $mount = "type=bind,source=$PWD,target=/app,readonly"
-docker run --rm --mount $mount -w /app php:7.4-cli sh -lc "find . -path ./dist -prune -o -type f -name '*.php' -print0 | xargs -0 -n1 php -l && php tests/verify-github-updater.php && php tests/verify-social-thumbnail.php && php tests/verify-threads.php"
+docker run --rm --mount $mount -w /app php:7.4-cli sh -lc "find . -path ./dist -prune -o -type f -name '*.php' -print0 | xargs -0 -n1 php -l && php tests/verify-github-updater.php && php tests/verify-social-thumbnail.php && php tests/verify-inline-images.php && php tests/verify-threads.php"
 
 & .\scripts\build-plugin.ps1
 ```
