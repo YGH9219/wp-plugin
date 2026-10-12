@@ -18,6 +18,11 @@ foreach ($attribute in @('openInNewTab', 'nofollow', 'sponsored')) {
 		throw "The $attribute link option must default to false."
 	}
 }
+foreach ($attribute in @('buttonColor', 'textColor')) {
+	if (-not $block.attributes.$attribute -or $block.attributes.$attribute.type -ne 'string' -or $block.attributes.$attribute.default -ne '') {
+		throw "The $attribute option must inherit the default when unset."
+	}
+}
 
 $renderer = Get-Content -Raw -Encoding utf8 (Join-Path $root 'blocks\pulse-button\render.php')
 foreach ($linkValue in @('noopener', 'nofollow', 'sponsored', 'target="_blank"')) {

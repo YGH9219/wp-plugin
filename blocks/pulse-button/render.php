@@ -20,9 +20,16 @@ if ( '' === $text ) {
 	return;
 }
 
+$button_color = isset( $attributes['buttonColor'] ) && is_string( $attributes['buttonColor'] ) ? sanitize_hex_color( $attributes['buttonColor'] ) : '';
+$text_color = isset( $attributes['textColor'] ) && is_string( $attributes['textColor'] ) ? sanitize_hex_color( $attributes['textColor'] ) : '';
+$button_color = $button_color ? $button_color : personal_cta_blocks_button_color();
+$text_color = $text_color ? $text_color : '#ffffff';
+$button_rgb = implode( ', ', personal_cta_social_thumbnail_rgb( $button_color ) );
+
 $wrapper_attributes = get_block_wrapper_attributes(
 	array(
 		'class' => 'personal-cta-blocks-pulse-button',
+		'style' => '--pct-button-color:' . $button_color . ';--pct-button-text-color:' . $text_color . ';--pct-button-rgb:' . $button_rgb . ';',
 	)
 );
 ?>

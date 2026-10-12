@@ -1,9 +1,13 @@
 ( function( blocks, blockEditor, components, element, i18n ) {
 	const { registerBlockType } = blocks;
-	const { URLInput, useBlockProps } = blockEditor;
+	const { URLInput, useBlockProps, InspectorControls, PanelColorSettings } = blockEditor;
 	const { TextControl, ToggleControl } = components;
 	const { createElement: el } = element;
 	const { __ } = i18n;
+	const hexColor = function( value, fallback ) {
+		return typeof value === 'string' && /^#(?:[0-9a-f]{3}|[0-9a-f]{6})$/i.test( value ) ? value : fallback;
+	};
+	const siteColor = hexColor( ( window.personalCtaButtonSettings || {} ).color, '#0f766e' );
 
 	registerBlockType( 'personal-cta-blocks/pulse-button', {
 		edit: function( { attributes, setAttributes } ) {
@@ -12,6 +16,12 @@
 			const openInNewTab = !! attributes.openInNewTab;
 			const nofollow = !! attributes.nofollow;
 			const sponsored = !! attributes.sponsored;
+			const buttonColor = hexColor( attributes.buttonColor, siteColor );
+			const textColor = hexColor( attributes.textColor, '#ffffff' );
+			const hex = buttonColor.slice( 1 ).replace( /^(.)(.)(.)$/, '$1$1$2$2$3$3' );
+			const rgb = [ 0, 2, 4 ].map( function( index ) {
+				return parseInt( hex.slice( index, index + 2 ), 16 );
+			} ).join( ', ' );
 			const rel = [
 				openInNewTab && 'noopener',
 				nofollow && 'nofollow',
@@ -19,11 +29,35 @@
 			].filter( Boolean ).join( ' ' );
 			const blockProps = useBlockProps( {
 				className: 'personal-cta-blocks-pulse-button',
+				style: {
+					'--pct-button-color': buttonColor,
+					'--pct-button-text-color': textColor,
+					'--pct-button-rgb': rgb,
+				},
 			} );
 
 			return el(
 				'div',
 				blockProps,
+				el( InspectorControls, { group: 'styles' },
+					el( PanelColorSettings, {
+						title: __( '버튼 색상', 'personal-cta-blocks' ),
+						initialOpen: true,
+						disableAlpha: true,
+						colorSettings: [
+							{
+								value: attributes.buttonColor || undefined,
+								label: __( '배경색', 'personal-cta-blocks' ),
+								onChange: function( value ) { setAttributes( { buttonColor: hexColor( value, '' ) } ); },
+							},
+							{
+								value: attributes.textColor || undefined,
+								label: __( '글자색', 'personal-cta-blocks' ),
+								onChange: function( value ) { setAttributes( { textColor: hexColor( value, '' ) } ); },
+							},
+						],
+					}, el( 'p', {}, __( '색상을 지우면 사이트 브랜드 색상과 흰색 글자로 돌아갑니다.', 'personal-cta-blocks' ) ) )
+				),
 				el(
 					'div',
 					{ className: 'personal-cta-blocks-pulse-button__fields' },

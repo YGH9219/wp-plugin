@@ -22,7 +22,7 @@ function personal_cta_social_thumbnail_settings() {
 			'enabled'       => true,
 			'logo_id'       => 0,
 			'logo_position' => 'top-right',
-			'border_color'  => '#2563eb',
+			'border_color'  => '#0f766e',
 		)
 	);
 }
@@ -42,7 +42,7 @@ function personal_cta_social_thumbnail_sanitize_settings( $input ) {
 		'enabled'       => ! empty( $input['enabled'] ),
 		'logo_id'       => $logo_id,
 		'logo_position' => in_array( $position, array( 'top-left', 'top-right' ), true ) ? $position : 'top-right',
-		'border_color'  => $color ? $color : '#2563eb',
+		'border_color'  => $color ? $color : '#0f766e',
 	);
 }
 
@@ -387,7 +387,10 @@ function personal_cta_social_thumbnail_render_settings_page() {
 				</tr>
 				<tr>
 					<th scope="row"><label for="pct-social-border-color">브랜드 색상</label></th>
-					<td><input id="pct-social-border-color" type="color" name="<?php echo esc_attr( PERSONAL_CTA_SOCIAL_THUMBNAIL_OPTION ); ?>[border_color]" value="<?php echo esc_attr( $settings['border_color'] ); ?>"></td>
+					<td>
+						<input id="pct-social-border-color" type="color" name="<?php echo esc_attr( PERSONAL_CTA_SOCIAL_THUMBNAIL_OPTION ); ?>[border_color]" value="<?php echo esc_attr( $settings['border_color'] ); ?>">
+						<p class="description">CTA 버튼의 기본 배경색과 브랜드 썸네일에 사용합니다. 기본값은 여행허브 청록색(#0F766E)이며, 버튼별 색상은 글 편집기에서 바꿀 수 있습니다.</p>
+					</td>
 				</tr>
 			</table>
 			<?php submit_button(); ?>
@@ -532,10 +535,13 @@ function personal_cta_social_thumbnail_variants() {
 	);
 }
 
-/** Converts a six-digit hex color to RGB. */
+/** Converts a three- or six-digit hex color to RGB. */
 function personal_cta_social_thumbnail_rgb( $hex ) {
 	$hex = sanitize_hex_color( $hex );
-	$hex = $hex ? ltrim( $hex, '#' ) : '2563eb';
+	$hex = $hex ? ltrim( $hex, '#' ) : '0f766e';
+	if ( 3 === strlen( $hex ) ) {
+		$hex = $hex[0] . $hex[0] . $hex[1] . $hex[1] . $hex[2] . $hex[2];
+	}
 
 	return array( hexdec( substr( $hex, 0, 2 ) ), hexdec( substr( $hex, 2, 2 ) ), hexdec( substr( $hex, 4, 2 ) ) );
 }

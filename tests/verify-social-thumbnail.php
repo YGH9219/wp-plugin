@@ -36,7 +36,7 @@ function absint( $value ) { return abs( (int) $value ); }
 function sanitize_key( $value ) { return preg_replace( '/[^a-z0-9_-]/', '', strtolower( (string) $value ) ); }
 function sanitize_text_field( $value ) { return trim( strip_tags( (string) $value ) ); }
 function sanitize_textarea_field( $value ) { return trim( strip_tags( (string) $value ) ); }
-function sanitize_hex_color( $value ) { return is_string( $value ) && preg_match( '/^#[0-9a-f]{6}$/i', $value ) ? strtolower( $value ) : null; }
+function sanitize_hex_color( $value ) { return is_string( $value ) && preg_match( '/^#(?:[0-9a-f]{3}|[0-9a-f]{6})$/i', $value ) ? strtolower( $value ) : null; }
 function wp_unslash( $value ) { return $value; }
 function wp_verify_nonce() { return true; }
 function current_user_can() { return true; }
@@ -158,7 +158,7 @@ function pct_social_assert( $condition, $message ) {
 }
 
 $defaults = personal_cta_social_thumbnail_settings();
-pct_social_assert( true === $defaults['enabled'] && 0 === $defaults['logo_id'] && '#2563eb' === $defaults['border_color'], 'Defaults must enable generation and use the site logo.' );
+pct_social_assert( true === $defaults['enabled'] && 0 === $defaults['logo_id'] && '#0f766e' === $defaults['border_color'], 'Defaults must enable generation, use the site logo and teal branding.' );
 pct_social_assert( 10 === personal_cta_social_thumbnail_logo_id( $defaults ), 'The theme Site Logo must be the default.' );
 
 $custom = personal_cta_social_thumbnail_sanitize_settings(
@@ -178,7 +178,7 @@ $invalid = personal_cta_social_thumbnail_sanitize_settings(
 		'border_color'  => 'blue',
 	)
 );
-pct_social_assert( false === $invalid['enabled'] && 0 === $invalid['logo_id'] && 'top-right' === $invalid['logo_position'] && '#2563eb' === $invalid['border_color'], 'Invalid settings must fall back safely.' );
+pct_social_assert( false === $invalid['enabled'] && 0 === $invalid['logo_id'] && 'top-right' === $invalid['logo_position'] && '#0f766e' === $invalid['border_color'], 'Invalid settings must fall back safely.' );
 
 pct_social_assert( array( 819, 546 ) === personal_cta_social_thumbnail_contain( 1200, 800, 1116, 546 ), 'Logo dimensions must preserve aspect ratio.' );
 pct_social_assert( array( 307, 546 ) === personal_cta_social_thumbnail_contain( 800, 1422, 1116, 546 ), 'Portrait logo dimensions must preserve aspect ratio.' );
@@ -212,6 +212,8 @@ $override_attributes = personal_cta_social_thumbnail_featured_image_alt( array( 
 pct_social_assert( '이 글에서만 쓰는 설명' === $override_attributes['alt'], 'An explicit post-level ALT must win without changing the attachment.' );
 unset( $test_post_meta[7][PERSONAL_CTA_SOCIAL_ALT_META] );
 pct_social_assert( array( 37, 99, 235 ) === personal_cta_social_thumbnail_rgb( '#2563eb' ), 'The brand color must convert to RGB.' );
+pct_social_assert( array( 170, 187, 204 ) === personal_cta_social_thumbnail_rgb( '#abc' ), 'Short hex colors must expand before RGB conversion.' );
+pct_social_assert( array( 15, 118, 110 ) === personal_cta_social_thumbnail_rgb( 'invalid' ), 'Invalid colors must use teal RGB.' );
 pct_social_assert(
 	array( 'social' => array( 1200, 630 ), '16x9' => array( 1200, 675 ), '4x3' => array( 1200, 900 ), '1x1' => array( 1200, 1200 ) ) === personal_cta_social_thumbnail_variants(),
 	'The generator must keep the four required output ratios.'

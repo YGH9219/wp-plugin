@@ -4,6 +4,7 @@ WordPress용 펄스 CTA 블록, AI 브랜드·본문 이미지, AI Threads 문�
 
 - 글 편집기에서 `/ㅂㅌ`으로 반응형 CTA 버튼 추가
 - CTA 버튼별 새 탭, `nofollow`, `sponsored` 링크 설정
+- 여행허브 청록색 기본 CTA와 버튼별 배경색·글자색 선택
 - 대표이미지 또는 수동 AI 배경을 소셜·Google 검색용 4종 브랜드 JPG로 자동 생성
 - Rank Math의 첫 번째 포커스 키워드로 비어 있는 대표이미지 ALT와 소셜 이미지 ALT 자동 보완
 - 두 줄 문구·이미지 초점·사이트 로고·브랜드 색상 설정
@@ -82,6 +83,12 @@ define( 'PERSONAL_CTA_THREADS_ACCESS_TOKEN', '...');
 
 `설정 → 브랜드 썸네일`에서 기능·로고·브랜드 색상을 정합니다. 별도 로고를 고르지 않으면 현재 테마의 사이트 로고를 사용합니다. 글 편집 화면의 `브랜드 썸네일` 패널에서는 최대 두 줄 문구, 이미지 초점과 ALT를 정합니다. ALT는 Rank Math의 첫 번째 포커스 키워드를 기본값으로 사용하며 직접 작성한 값이 항상 우선합니다.
 
+### CTA 버튼 색상
+
+0.9.3부터 새 설치의 브랜드 색상과 CTA 배경은 여행허브 청록색 `#0F766E`, 글자는 흰색입니다. `설정 → 브랜드 썸네일 → 브랜드 색상`을 바꾸면 별도 색상을 지정하지 않은 CTA와 새로 만드는 브랜드 썸네일에 적용됩니다. 기존에 저장한 브랜드 색상은 업데이트해도 유지하며, 이미 생성한 이미지 파일을 일괄 재생성하지 않습니다.
+
+버튼을 선택한 뒤 오른쪽 블록 설정의 `버튼 색상`에서 배경색·글자색을 각각 고를 수 있습니다. 설정·스타일 탭이 나뉜 편집기에서는 스타일 탭에 표시됩니다. 패널의 점 세 개 옵션 메뉴에서 해당 색상을 초기화하면 사이트 브랜드 색상·흰색 글자로 돌아갑니다. 충분히 대비되는 두 색상을 사용하세요. 색상 정보는 기존 블록에 선택 속성으로 저장하고, 링크·광고 속성은 유지합니다. 펄스·마우스 오버 그림자에도 선택한 배경색을 적용하며 방문자용 JavaScript는 추가하지 않습니다.
+
 대표이미지를 저장하면 원본은 건드리지 않고 업로드 폴더의 `personal-cta-social` 디렉터리에 JPG 4종을 새로 만듭니다. 1200×630은 로고와 최대 두 줄 문구가 있는 Facebook·Threads·X용이고, 1200×675·1200×900·1200×1200은 글자와 로고가 없는 Google·Article용입니다. `AI 배경 생성`은 설정된 OpenAI 키로 글 내용에 맞는 글자 없는 배경을 한 번 생성한 뒤 이 4종으로 가공하고, 완성된 1200×630 이미지를 미디어 라이브러리에 등록해 대표이미지로 설정합니다. 저장할 때 자동으로 OpenAI를 호출하지 않으므로 버튼을 누른 경우에만 이미지 API 비용이 발생합니다.
 
 Rank Math가 활성화되어 있으면 1200×630 JPG를 Facebook·Threads용 Open Graph 이미지와 X 이미지로 사용하고, Article 스키마의 `image`에는 1:1·4:3·16:9 JPG를 연결합니다. 글의 Rank Math 소셜 탭에서 이미지를 직접 지정한 경우에는 직접 지정한 소셜 이미지가 우선합니다.
@@ -116,9 +123,10 @@ Threads 계정 연결 후 `일상글 자동 게시 → 하루 5개`를 켜면 �
 
 ```powershell
 & .\tests\verify-pulse-button.ps1
+node .\tests\verify-pulse-button-editor.cjs
 
 $mount = "type=bind,source=$PWD,target=/app,readonly"
-docker run --rm --mount $mount -w /app php:7.4-cli sh -lc "find . -path ./dist -prune -o -type f -name '*.php' -print0 | xargs -0 -n1 php -l && php tests/verify-github-updater.php && php tests/verify-social-thumbnail.php && php tests/verify-inline-images.php && php tests/verify-threads.php"
+docker run --rm --mount $mount -w /app php:7.4-cli sh -lc "find . -path ./dist -prune -o -type f -name '*.php' -print0 | xargs -0 -n1 php -l && php tests/verify-github-updater.php && php tests/verify-pulse-button-render.php && php tests/verify-social-thumbnail.php && php tests/verify-inline-images.php && php tests/verify-threads.php"
 
 & .\scripts\build-plugin.ps1
 ```
