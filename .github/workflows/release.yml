@@ -29,10 +29,12 @@ jobs:
           & ./tests/verify-pulse-button.ps1
           node ./tests/verify-pulse-button-editor.cjs
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          $mount = "type=bind,source=$env:GITHUB_WORKSPACE,target=/app"
-          docker run --rm --mount $mount -w /app php:7.4-cli sh -lc "find . -path ./dist -prune -o -type f -name '*.php' -print0 | xargs -0 -n1 php -l && php tests/verify-github-updater.php && php tests/verify-pulse-button-render.php && php tests/verify-social-thumbnail.php && php tests/verify-inline-images.php && php tests/verify-threads.php"
+          node ./tests/verify-photo-gallery.cjs
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          docker run --rm --mount $mount -w /app php:8.3-cli sh -lc "find . -path ./dist -prune -o -type f -name '*.php' -print0 | xargs -0 -n1 php -l && php tests/verify-github-updater.php && php tests/verify-pulse-button-render.php && php tests/verify-social-thumbnail.php && php tests/verify-inline-images.php && php tests/verify-threads.php"
+          $mount = "type=bind,source=$env:GITHUB_WORKSPACE,target=/app"
+          docker run --rm --mount $mount -w /app php:7.4-cli sh -lc "find . -path ./dist -prune -o -type f -name '*.php' -print0 | xargs -0 -n1 php -l && php tests/verify-github-updater.php && php tests/verify-pulse-button-render.php && php tests/verify-social-thumbnail.php && php tests/verify-inline-images.php && php tests/verify-threads.php && php tests/verify-photo-gallery.php"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          docker run --rm --mount $mount -w /app php:8.3-cli sh -lc "find . -path ./dist -prune -o -type f -name '*.php' -print0 | xargs -0 -n1 php -l && php tests/verify-github-updater.php && php tests/verify-pulse-button-render.php && php tests/verify-social-thumbnail.php && php tests/verify-inline-images.php && php tests/verify-threads.php && php tests/verify-photo-gallery.php"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Publish GitHub release

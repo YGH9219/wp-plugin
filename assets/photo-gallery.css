@@ -1,0 +1,16 @@
+.wp-block-gallery.is-style-pct-swipe.has-nested-images{display:flex!important;flex-wrap:nowrap!important;gap:0!important;overflow-x:auto;overscroll-behavior-x:contain;scroll-snap-type:x mandatory;scrollbar-width:none;margin:0;max-width:100%;min-width:0}
+.wp-block-gallery.is-style-pct-swipe::-webkit-scrollbar{display:none}
+.wp-block-gallery.is-style-pct-swipe.has-nested-images>figure.wp-block-image{flex:0 0 100%!important;width:100%!important;min-width:100%;margin:0!important;scroll-snap-align:start;scroll-snap-stop:always;display:block;align-self:stretch}
+.pct-gallery .wp-block-gallery.is-style-pct-swipe.has-nested-images>figure.wp-block-image img,.editor-styles-wrapper .wp-block-gallery.is-style-pct-swipe.has-nested-images>figure.wp-block-image img{display:block;width:100%;height:auto!important;aspect-ratio:16/10!important;object-fit:cover;border-radius:0;flex:none}
+.pct-gallery .wp-block-gallery.is-style-pct-swipe.has-nested-images>figure.wp-block-image figcaption,.editor-styles-wrapper .wp-block-gallery.is-style-pct-swipe.has-nested-images>figure.wp-block-image figcaption{position:static;box-sizing:border-box;width:100%;max-height:none;margin:0;padding:9px 12px;min-height:3em;background:#edf3ef;color:#334b46;font-size:12px;line-height:1.5;text-align:left;overflow:visible}
+.pct-gallery{min-width:0;max-width:100%;align-self:start;background:#f4f8f6}
+.pct-gallery__controls:not([hidden]){display:flex;align-items:center;justify-content:flex-end;gap:8px;padding:8px 12px;min-height:44px;box-sizing:content-box;color:#335650;font:500 12px/1.4 system-ui,sans-serif}
+.pct-gallery__hint{margin-right:auto}
+.pct-gallery__count{min-width:42px;text-align:center;font-variant-numeric:tabular-nums}
+.pct-gallery .pct-gallery__controls button{display:grid;place-items:center;width:44px;height:44px;min-height:44px;padding:0;border:1px solid #bbd1c9;border-radius:50%;background:#fff;color:#0f655e;font:28px/1 system-ui,sans-serif;box-shadow:none;cursor:pointer}
+.pct-gallery .pct-gallery__controls button:hover{background:#e2eeea}
+.pct-gallery .pct-gallery__controls button:disabled{opacity:.35;cursor:default}
+.pct-gallery :focus-visible{outline:3px solid #0f766e;outline-offset:-3px}
+/* The editor keeps native gallery selection and reordering controls. */
+.editor-styles-wrapper .is-style-pct-swipe{scroll-snap-type:none}
+@media(prefers-reduced-motion:reduce){.is-style-pct-swipe{scroll-behavior:auto}}
