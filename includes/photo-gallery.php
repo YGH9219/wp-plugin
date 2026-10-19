@@ -3,7 +3,8 @@
 defined( 'ABSPATH' ) || exit;
 
 function personal_cta_gallery_register() {
-	wp_register_style( 'personal-cta-gallery', PERSONAL_CTA_BLOCKS_URL . 'assets/photo-gallery.css', array(), PERSONAL_CTA_BLOCKS_VERSION );
+	$css_version = PERSONAL_CTA_BLOCKS_VERSION . '-' . filemtime( PERSONAL_CTA_BLOCKS_DIR . '/assets/photo-gallery.css' );
+	wp_register_style( 'personal-cta-gallery', PERSONAL_CTA_BLOCKS_URL . 'assets/photo-gallery.css', array(), $css_version );
 	wp_register_script( 'personal-cta-gallery', PERSONAL_CTA_BLOCKS_URL . 'assets/photo-gallery.js', array(), PERSONAL_CTA_BLOCKS_VERSION, true );
 	register_block_style( 'core/gallery', array( 'name' => 'pct-swipe', 'label' => __( '옆으로 넘기는 사진', 'personal-cta-blocks' ) ) );
 }
