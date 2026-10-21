@@ -45,6 +45,7 @@ the_post();
 $original = get_the_content();
 $html = apply_filters( 'the_content', $original );
 related_wp_check( 1 === substr_count( $html, 'class="pct-related"' ) && 4 === substr_count( $html, '<li class="pct-related__item"' ), 'Exactly four related posts' );
+related_wp_check( 1 === substr_count( $html, '<aside ' ) && ! preg_match( '/<h[1-6]\b/i', $html ), 'Related links must not become article headings' );
 $position = -1;
 foreach ( array_reverse( $expected ) as $id ) {
 	$found = strpos( $html, 'href="' . esc_url( get_permalink( $id ) ) . '"' );

@@ -74,6 +74,7 @@ check_related( 'publish' === $args['post_status'] && 'post' === $args['post_type
 check_related( 4 === $args['posts_per_page'] && $args['ignore_sticky_posts'] && $args['no_found_rows'], 'Bounded query without pagination or sticky overrides' );
 check_related( array( 'date' => 'DESC', 'ID' => 'DESC' ) === $args['orderby'], 'Stable latest-first order' );
 check_related( 0 === strpos( $html, $content ) && 4 === substr_count( $html, '<li ' ), 'Preserve content and render four cards' );
+check_related( 1 === substr_count( $html, '<aside ' ) && ! preg_match( '/<h[1-6]\b/i', $html ), 'Labelled complementary links without article headings or TOC entries' );
 check_related( false === strpos( $html, '<script' ) && false === strpos( $html, 'javascript:' ), 'Reject unsafe image URLs and strip title markup' );
 check_related( false !== strpos( $html, 'beach.jpg' ) && false !== strpos( $html, 'featured.jpg' ) && false !== strpos( $html, '함께 읽어요' ), 'Featured, body image and no-image fallback' );
 check_related( false !== strpos( $html, '(제목 없음)' ) && false !== strpos( $html, '&amp;view=full' ), 'Untitled fallback and escaped links' );

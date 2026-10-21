@@ -54,19 +54,19 @@ function personal_cta_related_posts_append( $content ) {
 	$heading_id = wp_unique_id( 'pct-related-heading-' );
 	ob_start();
 	?>
-	<section class="pct-related" aria-labelledby="<?php echo esc_attr( $heading_id ); ?>" style="--pct-related-accent:<?php echo esc_attr( personal_cta_blocks_button_color() ); ?>;--pct-related-columns:<?php echo count( $related->posts ); ?>">
-		<h2 class="pct-related__heading" id="<?php echo esc_attr( $heading_id ); ?>"><?php esc_html_e( '함께 보면 좋은 글', 'personal-cta-blocks' ); ?></h2>
+	<aside class="pct-related" aria-labelledby="<?php echo esc_attr( $heading_id ); ?>" style="--pct-related-accent:<?php echo esc_attr( personal_cta_blocks_button_color() ); ?>;--pct-related-columns:<?php echo count( $related->posts ); ?>">
+		<p class="pct-related__heading" id="<?php echo esc_attr( $heading_id ); ?>"><?php esc_html_e( '함께 보면 좋은 글', 'personal-cta-blocks' ); ?></p>
 		<ul class="pct-related__grid" role="list">
 			<?php foreach ( $related->posts as $related_post ) : ?>
 				<li class="pct-related__item">
 					<a class="pct-related__link" href="<?php echo esc_url( get_permalink( $related_post ) ); ?>">
 						<span class="pct-related__media"><?php echo personal_cta_related_posts_thumbnail( $related_post ); ?></span>
-						<h3 class="pct-related__title"><?php echo esc_html( wp_strip_all_tags( get_the_title( $related_post ) ) ?: __( '(제목 없음)', 'personal-cta-blocks' ) ); ?></h3>
+						<span class="pct-related__title"><?php echo esc_html( wp_strip_all_tags( get_the_title( $related_post ) ) ?: __( '(제목 없음)', 'personal-cta-blocks' ) ); ?></span>
 					</a>
 				</li>
 			<?php endforeach; ?>
 		</ul>
-	</section>
+	</aside>
 	<?php
 	return $content . ob_get_clean();
 }
