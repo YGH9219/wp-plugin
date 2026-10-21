@@ -2,8 +2,8 @@
 /**
  * Plugin Name: Personal CTA Blocks
  * Plugin URI: https://github.com/YGH9219/wp-plugin
- * Description: 펄스 CTA 버튼, AI 브랜드·본문 이미지, AI Threads 문구 생성·자동 게시를 제공합니다.
- * Version: 0.9.5
+ * Description: 펄스 CTA 버튼, 같은 카테고리 추천 글, AI 브랜드·본문 이미지, AI Threads 문구 생성·자동 게시를 제공합니다.
+ * Version: 0.9.6
  * Requires at least: 6.3
  * Requires PHP: 7.4
  * Update URI: https://github.com/YGH9219/wp-plugin
@@ -12,7 +12,7 @@
 
 defined( 'ABSPATH' ) || exit;
 
-define( 'PERSONAL_CTA_BLOCKS_VERSION', '0.9.5' );
+define( 'PERSONAL_CTA_BLOCKS_VERSION', '0.9.6' );
 define( 'PERSONAL_CTA_BLOCKS_FILE', __FILE__ );
 define( 'PERSONAL_CTA_BLOCKS_DIR', __DIR__ );
 define( 'PERSONAL_CTA_BLOCKS_URL', plugin_dir_url( __FILE__ ) );
@@ -25,6 +25,7 @@ require_once __DIR__ . '/includes/threads-admin.php';
 require_once __DIR__ . '/includes/social-thumbnail.php';
 require_once __DIR__ . '/includes/inline-images.php';
 require_once __DIR__ . '/includes/photo-gallery.php';
+require_once __DIR__ . '/includes/related-posts.php';
 
 function personal_cta_blocks_button_color() {
 	$settings = personal_cta_social_thumbnail_settings();

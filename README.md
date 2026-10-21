@@ -6,6 +6,7 @@ WordPress용 펄스 CTA 블록, AI 브랜드·본문 이미지, AI Threads 문�
 - CTA 버튼별 새 탭, `nofollow`, `sponsored` 링크 설정
 - 여행허브 청록색 기본 CTA와 버튼별 배경색·글자색 선택
 - 기본 갤러리 블록의 `옆으로 넘기는 사진` 스타일: 모바일 스와이프, 이전/다음 버튼, 방향키·Home·End 지원
+- 글 하단에 같은 카테고리의 최신 글을 썸네일·제목으로 최대 4개 자동 표시
 - 대표이미지 또는 수동 AI 배경을 소셜·Google 검색용 4종 브랜드 JPG로 자동 생성
 - Rank Math의 첫 번째 포커스 키워드로 비어 있는 대표이미지 ALT와 소셜 이미지 ALT 자동 보완
 - 두 줄 문구·이미지 초점·사이트 로고·브랜드 색상 설정
@@ -29,6 +30,14 @@ Threads 기능과 일상글 자동 게시는 기본적으로 꺼져 있으며, �
 자동 재생이나 외부 슬라이더 의존성이 없습니다. 두 장 이상인 해당 스타일에만 방문자 스크립트를 불러오며, JavaScript가 꺼져도 가로 스크롤로 사진을 볼 수 있습니다. 플러그인을 꺼도 원래 갤러리와 이미지가 보존됩니다.
 
 0.9.5부터 PC 폭(769px 이상)에서는 이전·다음 버튼이 사진 좌우 중앙에 겹쳐 표시되고, 현재 장수는 사진 오른쪽 아래에 나옵니다. 모바일은 사진 아래 조작부와 스와이프를 유지합니다. 기존 버튼의 CSS만 바꾸며 사진·ALT·캡션·예약 링크나 방문자 JavaScript를 추가하지 않습니다.
+
+## 함께 보면 좋은 글
+
+0.9.6부터 일반 글 하단에 **함께 보면 좋은 글**을 자동 표시합니다. 현재 글과 카테고리가 하나 이상 겹치는 공개 글을 최신순으로 최대 4개 보여주며, 현재 글·비밀번호 글·비공개·임시 글은 제외합니다. 같은 카테고리의 글이 적으면 있는 만큼만 표시하고, 한 개도 없으면 영역을 숨깁니다. 페이지·목록·피드·REST 응답에는 추가하지 않으며 저장된 본문을 변경하지 않습니다.
+
+가로형 16:9 썸네일 아래에 제목을 배치하고, PC에서는 결과 수에 따라 최대 4열, 모바일(600px 이하)에서는 2열로 표시합니다. 대표이미지가 없으면 본문의 첫 이미지를 사용하고, 이미지가 전혀 없으면 대체 영역을 표시합니다. 글꼴·글자색은 테마를 따르고 제목 옆 포인트는 기존 브랜드 색상을 사용합니다. 키보드 초점 표시와 동작 줄이기를 지원하며 방문자 JavaScript·외부 API·추가 설정은 필요하지 않습니다. 다른 테마나 플러그인에서도 관련 글을 출력한다면 해당 기능은 별도로 꺼야 중복 노출을 피할 수 있습니다.
+
+디자인 참고: [Jetpack Related Posts](https://jetpack.com/support/related-posts/), [Related Posts Thumbnails](https://wordpress.org/plugins/related-posts-thumbnails/), [Contextual Related Posts](https://wordpress.org/plugins/contextual-related-posts/).
 
 ## 요구 사항
 
@@ -135,7 +144,7 @@ Threads 계정 연결 후 `일상글 자동 게시 → 하루 5개`를 켜면 �
 node .\tests\verify-pulse-button-editor.cjs
 
 $mount = "type=bind,source=$PWD,target=/app,readonly"
-docker run --rm --mount $mount -w /app php:7.4-cli sh -lc "find . -path ./dist -prune -o -type f -name '*.php' -print0 | xargs -0 -n1 php -l && php tests/verify-github-updater.php && php tests/verify-pulse-button-render.php && php tests/verify-social-thumbnail.php && php tests/verify-inline-images.php && php tests/verify-threads.php"
+docker run --rm --mount $mount -w /app php:7.4-cli sh -lc "find . -path ./dist -prune -o -type f -name '*.php' -print0 | xargs -0 -n1 php -l && php tests/verify-github-updater.php && php tests/verify-pulse-button-render.php && php tests/verify-social-thumbnail.php && php tests/verify-inline-images.php && php tests/verify-threads.php && php tests/verify-photo-gallery.php && php tests/verify-related-posts.php"
 
 & .\scripts\build-plugin.ps1
 ```

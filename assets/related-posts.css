@@ -1,0 +1,121 @@
+.pct-related {
+	border-block-start: 1px solid rgba(128, 128, 128, 0.22);
+	color: inherit;
+	margin-block: 3rem 1.5rem;
+	padding-block-start: 1.75rem;
+}
+
+.pct-related .pct-related__heading {
+	align-items: center;
+	color: inherit;
+	display: flex;
+	font-family: inherit;
+	font-size: clamp(1.2rem, 1rem + 0.5vw, 1.5rem);
+	font-weight: 750;
+	gap: 0.65rem;
+	letter-spacing: -0.03em;
+	line-height: 1.4;
+	margin: 0 0 1.25rem;
+	padding: 0;
+}
+
+.pct-related__heading::before {
+	background: var(--pct-related-accent, #0f766e);
+	border-radius: 2px;
+	content: "";
+	flex: 0 0 4px;
+	height: 1em;
+}
+
+.pct-related .pct-related__grid {
+	display: grid;
+	gap: 1.5rem 1.25rem;
+	grid-template-columns: repeat(var(--pct-related-columns, 4), minmax(0, 1fr));
+	list-style: none;
+	margin: 0;
+	padding: 0;
+}
+
+.pct-related .pct-related__item {
+	list-style: none;
+	margin: 0;
+	min-width: 0;
+	padding: 0;
+}
+
+.pct-related .pct-related__link {
+	background: transparent;
+	border: 0;
+	box-shadow: none;
+	color: inherit;
+	display: block;
+	text-decoration: none;
+}
+
+.pct-related .pct-related__media {
+	aspect-ratio: 16 / 9;
+	background: rgba(128, 128, 128, 0.08);
+	border-radius: 12px;
+	display: block;
+	overflow: hidden;
+}
+
+.pct-related .pct-related__media img {
+	border: 0;
+	border-radius: 0;
+	display: block;
+	height: 100%;
+	margin: 0;
+	max-width: none;
+	object-fit: cover;
+	width: 100%;
+}
+
+.pct-related__placeholder {
+	align-items: center;
+	color: inherit;
+	display: flex;
+	font-size: 0.85rem;
+	font-weight: 600;
+	height: 100%;
+	justify-content: center;
+	opacity: 0.65;
+}
+
+.pct-related .pct-related__title {
+	color: inherit;
+	font-family: inherit;
+	font-size: 1rem;
+	font-weight: 650;
+	letter-spacing: -0.025em;
+	line-height: 1.55;
+	margin: 0.7rem 0 0;
+	overflow-wrap: anywhere;
+	padding: 0;
+	word-break: keep-all;
+}
+
+.pct-related__link:hover .pct-related__title {
+	text-decoration: underline;
+	text-decoration-color: var(--pct-related-accent, #0f766e);
+	text-underline-offset: 0.2em;
+}
+
+.pct-related .pct-related__link:focus-visible {
+	border-radius: 12px;
+	outline: 2px solid currentColor;
+	outline-offset: 5px;
+}
+
+@media (prefers-reduced-motion: no-preference) and (hover: hover) {
+	.pct-related__media img { transition: transform 180ms ease; }
+	.pct-related__link:hover img { transform: scale(1.035); }
+}
+
+@media (max-width: 600px) {
+	.pct-related .pct-related__grid {
+		gap: 1.25rem 0.85rem;
+		grid-template-columns: repeat(2, minmax(0, 1fr));
+	}
+	.pct-related__item:only-child { grid-column: 1 / -1; }
+}

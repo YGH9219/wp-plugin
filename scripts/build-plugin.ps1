@@ -77,6 +77,8 @@ try {
 		"$slug/includes/social-thumbnail.php",
 		"$slug/includes/inline-images.php",
 		"$slug/includes/photo-gallery.php",
+		"$slug/includes/related-posts.php",
+		"$slug/assets/related-posts.css",
 		"$slug/assets/photo-gallery.css",
 		"$slug/assets/photo-gallery.js",
 		"$slug/assets/fonts/Pretendard-ExtraBold.otf",
